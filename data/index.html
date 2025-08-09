@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>ESP32 File Manager</title>
+  <meta charset="UTF-8" />
+</head>
+<body>
+  <h2>Upload File</h2>
+  <form id="uploadForm" method="POST" action="/upload" enctype="multipart/form-data">
+    <input type="file" name="upload" required />
+    <input type="submit" value="Upload" />
+  </form>
+
+  <h2>Files on ESP32</h2>
+  <table border="1">
+    <thead><tr><th>Filename</th><th>Size</th><th>Download</th><th>Delete</th><th>View</th></tr></thead>
+    <tbody id="fileTable"></tbody>
+  </table>
+
+  <h2>Preview</h2>
+  <pre id="fileContent" style="max-height: 300px; overflow-y: auto; border: 1px solid #ccc;"></pre>
+
+  <script>
+    const protectedFiles = ["index.html", "config.json"];
+
+    function loadFileList() {
+      fetch('/list')
+        .then(res => res.json())
+        .then(files => {
+          const table = document.getElementById("fileTable");
+          table.innerHTML = "";
+          files.forEach(file => {
+            const isProtected = protectedFiles.includes(file.name);
+            const row = document.createElement("tr");
+
+            row.innerHTML = `
+              <td>${file.name}</td>
+              <td>${file.size} bytes</td>
+              <td><a href="/download?file=${encodeURIComponent(file.name)}">Download</a></td>
+              <td>${!isProtected ? `<button onclick="deleteFile('${file.name}')">Delete</button>` : ""}</td>
+              <td><a href="#" onclick="viewFile('${file.name}')">View</a></td>
+            `;
+            table.appendChild(row);
+          });
+        });
+    }
+
+    function deleteFile(name) {
+      if (protectedFiles.includes(name)) {
+        alert(`${name} is protected and cannot be deleted.`);
+        return;
+      }
+
+      if (!confirm(`Delete ${name}?`)) return;
+      fetch('/delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: `name=${encodeURIComponent(name)}`
+      })
+      .then(response => response.text())
+      .then(data => {
+        alert(data);
+        loadFileList();  // Refresh file list
+      })
+      .catch(err => alert("Error deleting file: " + err));
+    }
+
+    function viewFile(name) {
+      fetch(`/view?file=${encodeURIComponent(name)}`)
+        .then(res => res.ok ? res.text() : Promise.reject("Failed to load"))
+        .then(text => {
+          document.getElementById("fileContent").textContent = text;
+        })
+        .catch(err => alert(err));
+    }
+
+    document.getElementById("uploadForm").addEventListener("submit", function() {
+      setTimeout(() => loadFileList(), 1000); // Delay reload after upload
+    });
+
+    window.onload = loadFileList;
+  </script>
+</body>
+</html>

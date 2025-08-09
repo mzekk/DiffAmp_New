@@ -1,0 +1,83 @@
+Option_name,Type,Option_value,comment
+ADC_Averages,u,3,Averages can be 0 = 1; 1 = 2; 2=4; 3 =8; 4 = 16; 5 = 32; 6 = 64; 7 = 128; 8 =256
+ADC_Sample_Rate,u,2,Options are 0 = 20; 1 = 45; 2 = 90; 3 = 175; 4 = 300; 5 = 600; 7 = 1000; 8 = 2000 SPS
+ADC_VbattCorr,f,1,Linear correction m parameter for Vbatt
+ADC_VdiffGain,u,0,ADC Gain in Volt mode for Vdiff measurement. 0 = x1; 1 = x2 - 7 = x128 
+ADC_VmeasNegR1Gain,f,0.99872,Negative linear correction m parameter for -Vmeas (24V Range)
+ADC_VmeasNegR1Offset,f,-0.00111,Negative linear correction b parameter fopr -Vmeas (24V Range)
+ADC_VmeasNegR2Gain,f,0.99872,Negative linear correction m parameter for -Vmeas(240V Range)
+ADC_VmeasNegR2Offset,f,-0.00111,Negative linear correction b parameter fopr -Vmeas (240V Range)
+ADC_VmeasR1Offset,f,-0.0111,Voltage offset near zero (24V Range)
+ADC_VmeasR1PosGain,f,0.99956,Positive linear correction m parameter for +Vmeas (24V Range)
+ADC_VmeasR1PosOffset,f,-0.021,Positive linear correction b parameter for +Vmeas (24V Range)
+ADC_VmeasR2Offset,f,-0.0111,Voltage offset near zero(240V Range)
+ADC_VmeasR2PosGain,f,0.99956,Positive linear correction m parameter for +Vmeas(240V Range)
+ADC_VmeasR2PosOffset,f,-0.021,Positive linear correction b parameter for +Vmeas (240V Range)
+ADC_VnPGain,u,1,ADC Gain in Volt mode for +Vn/-Vn measurement. 0 = x1; 1 = x2 - 7 = x128 
+ADC_VrefGain,f,1,Linear correction m parameter for Vref
+ADC_VrefOffset,f,0,Linear correction b parameter for Vref
+ADC_x128_GainCorr,f,1,Correction for ADC set in x128 Gain
+ADC_x16_GainCorr,f,1,Correction for ADC set in x16 Gain
+ADC_x2_GainCorr,f,1,Correction for ADC set in x2 Gain
+ADC_x32_GainCorr,f,1,Correction for ADC set in x32 Gain
+ADC_x4_GainCorr,f,1,Correction for ADC set in x4 Gain
+ADC_x64_GainCorr,f,1,Correction for ADC set in x64 Gain
+ADC_x8_GainCorr,f,1,Correction for ADC set in x8 Gain
+BacklightBrightness,u,60,Brightness % can be set from 10 to 127
+BacklightLowBrght,u,10,Brightness % in low power (standby) can be set from 2 to 127
+BacklightTout,u,6,Inactive time to dim the backlight in 5 sec steps (0 = Never Dim; 1 = 5sec - 18 = 90sec)
+BattLowThreshold,f,3.4,Low battery threshold in volts
+BattOkThreshold,f,3.6,Battery voltage OK threshold in volts
+BattProtect,b,0,BattProtect
+BattMinChargeLeft,u,30,Min battery charge % remaining before Auto shutoff
+DAC_V_Iref_Gain,f,1,Positive linear correction m parameter for IREF
+DAC_V_Iref_Offset,f,0,Positive linear correction b parameter for IREF
+DAC_V_Iset_Gain,f,1,Positive linear correction m parameter for ISET
+DAC_V_Iset_Offset,f,0,Positive linear correction b parameter for ISET
+DAC_Voffs_Gain,f,1,Positive linear correction m parameter for VOFFS
+DAC_Voffs_Offset,f,0,Positive linear correction b parameter for VOFFS
+DAC_Vsetn_Gain,f,1,Positive linear correction m parameter for VSETN
+DAC_Vsetn_Offset,f,0,Positive linear correction b parameter for VSETN
+DAC_Vsetp_Gain,f,1,Positive linear correction m parameter for VSETP
+DAC_Vsetp_Offset,f,0,Positive linear correction b parameter for VSETP
+Diode_Buzz,b,0,0 = Buzzer Disabled; 1 = Buzzer Enabled (Continuity Mode)
+Diode_I_LED,f,5000,LED Diode; test current in uA
+Diode_I_LowVF,f,100,Low VF Diode; test current in uA
+Diode_I_Zener,f,100,Zener Diode; test current in uA
+Diode_MeasMode,b,0,0 = Countinuous; 1 = Measure Sampled by Trig button press
+Diode_V_LED,f,4,LED Diode; test voltage in Volt
+Diode_V_LowVF,f,2,Low VF Diode; test voltage in Volt
+Diode_V_Zener,f,12,Zener Diode; test voltage in Volt
+DiodeType,u,0,0 = Low Vf; 1 = Zener; 2 = LED
+LastScreen,u,0,0 = VoltScrn; 1 = OhmScrn; 2 = DiodeScrn; 3 = MeasVoltScrn; 4 = SMUScrn; 5 =ConfigScrn
+MAC_Address_Device,s,24:62:AB:F5:01:48,MAC Address of this device (Master)
+MAC_Address_Remote,s,68:B6:B3:23:38:8C,MAC Address for the remote device
+Ohm_Buzz,b,0,0 = Buzzer Disabled; 1 = Buzzer Enabled (Continuity Mode)
+Ohm_I_100kR,f,30,Test current; in uA; for resistance < 100kohm
+Ohm_I_10kR,f,300,Test current; in uA; for resistance < 10kohm
+Ohm_I_10MR,f,1,Test current; in uA; for resistance < 3Mohm
+Ohm_I_1kR,f,3000,Test current; in uA; for resistance < 1kohm
+Ohm_I_1MR,f,3,Test current; in uA; for resistance < 1Mohm
+Ohm_I_1R,f,10000,Test current; in uA; for resistance < 1ohm
+Ohm_MeasMode,b,0,0 = Countinuous; 1 = Measure Sampled by Trig button press
+Ohm_Range,u,0,0 = Auto; 1 = 0.9999;  2 = 999.9; 3 = 9.999K; 4 = 99.99K; 5 = 999.9K; 6 = 9.999M
+Ohm_V_100kR,f,3,Test voltage for resistance < 100kohm
+Ohm_V_10kR,f,3,Test voltage for resistance < 10kohm
+Ohm_V_10MR,f,3,Test voltage for resistance < 3Mohm
+Ohm_V_1kR,f,3,Test voltage for resistance < 1kohm
+Ohm_V_1MR,f,3,Test voltage for resistance < 1Mohm
+Ohm_V_1R,f,3,Test voltage for resistance < 1ohm
+Opt_FlipScreen,b,0,0 = No Flip; 1 = Flip Screen 180 degrees
+Revision,u,0x111,Revisions: Hw revision [bit 0-3]; SW revision Minor [bit 4-7]; SW revision Major [bit 8-11]; Submodel [bit 12-15]
+SleepMaxTime,u,12,Time in hours to keep the device in sleep mode. Avoids overdisharging the battery; Max time is 80hrs
+SleepNumCyclesToMeas,u,43,Number of sleep cycles to measure battery voltage and charge state
+SleepTimeCycleMs,u,700,Single light sleep cycle
+SleepWithCharger,b,1,0 = Sleep mode is enabled when charger is attached; 1 = Never goes to sleep when charger is in.
+SMU_I_Lim,f,20,Max Allowable Current; from +/- 1uA to 100mA
+SMU_V_Lim,f,4,Max Allowable voltage; from +/- 3V to 15
+StandbyTout,u,0,0 = Never in Standby; 1 = 1min; 2 = 2min; 3 = 5min; 4 = 10min; 5 = 20min; 6 = 30min; 7 = 45min; 8 = 1Hr
+SwitchTurnOffTime,u,3000,Time in ms to turn off the system.
+TimeDaylightOffset,b,1,0 = Standard time; 1 = Daylight
+TimeZone,i,-8,UTC Standard (E.G. Pacific = -8 -> -28800 seconds)
+Volt_Range,u,0,0 = Auto; 1 = mV; 2 = 24V; 3 = 240V
+dataChecksum,u64,0x99D6A9, 0x99D6A9 (10081961 dec) = Forces options loading otherwise contains the bytewise adding of each Option_value elements. 

@@ -1,0 +1,21 @@
+SET(SOURCES screens/ui_Main.c
+    screens/ui_WiFi.c
+    screens/ui_Graph.c
+    screens/ui_Volt_More.c
+    screens/ui_MoreOptions.c
+    screens/ui_Messages.c
+    ui.c
+    components/ui_comp_hook.c
+    ui_helpers.c
+    ui_events.c
+    images/ui_img_bargraph_24fs_png.c
+    images/ui_img_speakerofficon_png.c
+    images/ui_img_speakeronicon_png.c
+    images/ui_img_icn_pc_png.c
+    images/ui_img_icn_wifi_png.c
+    images/ui_img_chargein_png.c
+    fonts/ui_font_Lucon48.c
+    fonts/ui_font_SegD22.c
+    fonts/ui_font_SegD48.c)
+
+add_library(ui ${SOURCES})

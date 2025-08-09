@@ -1,0 +1,151 @@
+// Route for file upload  
+    server.on("/upload", HTTP_POST, 
+    [](AsyncWebServerRequest *request) {
+      request->send(200, "text/plain", "Upload complete");
+    }, 
+    [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+      static File uploadFile;
+
+      if (!index) {
+        serialPrintDebug("Upload start: %s\n", filename.c_str());
+        uploadFile = SPIFFS.open("/" + filename, FILE_WRITE);
+        if (!uploadFile) {
+          serialPrintDebug("Failed to open file for writing\n");
+          return;
+        }
+      }
+      if (uploadFile) {
+        uploadFile.write(data, len);
+      }
+
+      if (final) {
+        uploadFile.close();
+        serialPrintDebug("Upload complete: %s, %d bytes\n", filename.c_str(), index + len);
+      }
+    }
+    );
+
+// Route to load form for file download from SPIFFS
+    server.on("/download", HTTP_GET, [](AsyncWebServerRequest *request) {
+      if (!isAuthenticated(request)) {
+        return request->requestAuthentication();
+      }
+      if (!request->hasParam("file")) {
+        request->send(400, "text/plain", "Missing 'file' parameter");
+      return;
+      }
+
+      String filename = request->getParam("file")->value();
+      if (!filename.startsWith("/")) {
+        filename = "/" + filename;
+      }
+
+      if (!SPIFFS.exists(filename)) {
+        serialPrintDebug("File not found: %s\n", filename.c_str());
+        request->send(404, "text/plain", "File not found");
+        return;
+      }
+      serialPrintDebug("Viewing file: %s\n", filename.c_str());
+      request->send(SPIFFS, filename, "application/octet-stream", true); 
+    });
+
+// Route to load form for file Deleted
+    server.on("/delete", HTTP_POST, [](AsyncWebServerRequest *request){
+      if (!isAuthenticated(request)) {
+        return request->requestAuthentication();
+      }
+      if (!request->hasParam("name", true)) {
+        request->send(400, "text/plain", "Missing file name");
+        return;
+      }
+      String filename = request->getParam("name", true)->value();
+      if (!filename.startsWith("/")) {
+        filename = "/" + filename;
+      }
+      serialPrintDebug("Deleting file: %s\n", filename.c_str());
+  
+      if (SPIFFS.exists(filename)) {
+        SPIFFS.remove(filename);
+        request->send(200, "text/plain", "Deleted");
+      } 
+      else {
+        request->send(500, "text/plain", "File not found");
+      }
+    });
+
+// Route to list directory
+    server.on("/list", HTTP_GET, [](AsyncWebServerRequest *request){
+      if (!isAuthenticated(request)) {
+        return request->requestAuthentication();
+      }
+      String output = "[";
+      File root = SPIFFS.open("/");
+      File file = root.openNextFile();
+      bool first = true;
+
+      while (file) {
+        if (!first) output += ",";
+        output += "{\"name\":\"" + String(file.name()) + "\",\"size\":" + String(file.size()) + "}";
+        first = false;
+        file = root.openNextFile();
+      }
+      output += "]";
+      request->send(200, "application/json", output);
+    });
+
+// Quit command to resume ESP-NOW
+    server.on("/resume", HTTP_GET, [](AsyncWebServerRequest *request) {
+      Serial.println("[/resume] Resuming ESP-NOW via HTML command");
+      //EspNowManager::resume();
+      request->send(200, "text/plain", "ESP-NOW resumed");
+      espNowPaused = false;
+    });    
+
+// View command to list file content
+server.on("/view", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (!isAuthenticated(request)) {
+        return request->requestAuthentication();
+      }
+
+    if (!request->hasParam("file")) {
+      request->send(400, "text/plain", "Missing file param");
+      return;
+    }
+
+    String filename = request->getParam("file")->value();
+    if (!filename.startsWith("/")) filename = "/" + filename;
+
+    if (!SPIFFS.exists(filename)) {
+      request->send(404, "text/plain", "File not found");
+      return;
+    }
+
+    File file = SPIFFS.open(filename, FILE_READ);
+    if (!file) {
+      request->send(500, "text/plain", "Failed to open file");
+      return;
+    }
+
+    // Pause ESP-NOW to free heap
+    //EspNowManager::pause();
+
+    request->sendChunked("text/plain", [file](uint8_t *buffer, size_t maxLen, size_t index) mutable -> size_t {
+      if (!file.available()) {
+        file.close();
+        // Schedule resume after short delay
+        static bool scheduled = true; // Set false if you want to resume ESP-NOW after timeout (2s) 
+        if (!scheduled) {
+          scheduled = true;
+          xTimerHandle resumeTimer = xTimerCreate("resumeEspNow", pdMS_TO_TICKS(2000), pdFALSE, NULL, [](TimerHandle_t){
+            //EspNowManager::resume();
+            scheduled = false;
+          });
+          xTimerStart(resumeTimer, 0);
+        }
+        return 0; // done
+        }
+
+        size_t len = file.read(buffer, maxLen);
+        return len;
+      });
+    });     

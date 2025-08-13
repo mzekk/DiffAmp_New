@@ -24,7 +24,7 @@ BatteryManager::BatteryManager(sysOptions* options)
       overchargeTestTime(0),
       sleepCycleCounter(0),
       maxSleepCycles(0),
-      maxCharge(sysOpt->SleepMaxTime * MS_IN_ONE_HOUR / sysOpt->SleepTimeCycleMs)
+      maxCharge(sysOpt->SleepMaxTime * MS_IN_ONE_HOUR / sysOpt->SleepTimeCycleMs) // Needed?
 {
     // Initial hardware read
     readHardwareState();

@@ -47,6 +47,7 @@ private:
     void readHardwareState();
     void updateActiveMode();
     void updateSleepMode();
+    void resetChargeLogic();
     bool checkChargerPresence(float maxCharge);
     void updateChargerIcon();
 

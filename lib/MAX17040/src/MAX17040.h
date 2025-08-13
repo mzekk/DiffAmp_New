@@ -24,7 +24,7 @@ published by the Free Software Foundation.
 #define MAX17040G_MODE_MSB      0x06 // Mode command, only QUICK-START (0x4000) is allowed parameter    
 #define MAX17040G_MODE_LSB      0x07 // Mode command, only QUICK-START (0x4000) is allowed parameter   
 #define MAX17040G_VER_MSB       0x08 // IC Version MSB 
-#define MAX17040G_VER_MSB       0x09 // IC Version MSB 
+#define MAX17040G_VER_LSB       0x09 // IC Version MSB 
 #define MAX17040G_COMP_MSB      0x0C // Battery algorithm compensation, default is 0x9700 
 #define MAX17040G_COMP_LSB      0x0D // Battery algorithm compensation, default is 0x9700  
 #define MAX17040G_CMD_MSB       0xFE // Special Command MSB - Only 0x0054 is allowed

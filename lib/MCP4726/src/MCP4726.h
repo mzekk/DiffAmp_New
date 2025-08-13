@@ -18,7 +18,7 @@ published by the Free Software Foundation.
 #include <Arduino.h>
 #include <Wire.h>
 
-#define INT_VREF 				0x10 // Unbuffered reference from VDD (supply pin)
+#define INT_VREF_SEL_DAC1 				0x10 // Unbuffered reference from VDD (supply pin)
 #define INT_VREFB 				0x18 // External reference voltage, Unbuffered
 #define VDD_VREF				0 	// External reference voltage, Buffered
 #define INT_VREF_VAL 			2.048 // Internal reference voltage

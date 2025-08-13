@@ -18,7 +18,6 @@
 #include <MCP4728.h>  // Load the MCP4728 4-Channel DAC Library
 #include <MCP4726.h>  // Load the MCP4726 1-Channel DAC Library
 #include <ADS122C04.h> // Load the ADS122C04 4-Channel ADC Library
-#include <Rotary.h>
 #include <FileFun.h>
 #include <string.h>
 #include "EncoderRead.h"
@@ -26,6 +25,8 @@
 #include "Ticker.h"
 #include <WiFi.h>
 #include "esp_wifi.h"
+#include "SysOptions.h"
+#include "BatteryManager.h"
 
 
 #define TEST_ENCODER 1
@@ -39,7 +40,7 @@
 PCA9554 ioExp(PCA9554_PE_ID);  // Create an object at this address
 MAX17040 bMon(MAX17040G_FG_ID);// Create an object at this address
 MCP4728 dac4ch(MCP4728_4DAC_ID, VREF_CONF); // Create an object at this address
-MCP4726 dac1ch(MCP4726A3_1DAC_ID, INT_VREF, DAC_GAIN_1X); // Create an object at this address
+MCP4726 dac1ch(MCP4726A3_1DAC_ID, INT_VREF_SEL_DAC1, DAC_GAIN_1X); // Create an object at this address
 SFE_ADS122C04 adc;
 EncoderRead encoder(ENC_A, ENC_B, ENC_SW); //PinA, PinB, button (PinA and PinB must be connected to interrupt-supported pins).
 
@@ -48,6 +49,7 @@ const char* optionsTestSave = "/MemSave.csv";
 struct sysOptions sysOpt;
 struct_message incomingReadings;
 struct_message voltReadings;
+BatteryManager* pBatteryManager = nullptr;
 
 String dataOptions;
 String macAddress = "FF:FF:FF:FF:FF:FF";
@@ -72,8 +74,8 @@ lv_style_t focus_style;
 
 void init_focus_style();
 void setupEncoderLV(void);
-void getOptionsfromFile(String dataOptions, sysOptions* sysOpt);
-void WriteOptionsToFile(String dataOptions, sysOptions* sysOpt);
+bool getOptionsfromFile(const char *fileName, sysOptions &options); // Already updated, good.
+bool WriteOptionsToFile(const char *fileName, const sysOptions &options); // Already updated, good.
 void initUIdata(sysOptions* sysOpt);
 void ui_create_groups(void);
 uint8_t get_current_screen(uint8_t currentScreen, lv_obj_t* previous_screen);
@@ -99,8 +101,6 @@ void updateVbatt(void);
 void pbHV_Control(void);
 
 uint16_t sleepCheck = 0;
-
-//Rotary r = Rotary(ENC_A, ENC_B);
 
 unsigned char result, result_slow = false, avg_cntr = 0;
 char time_str[30], date_str[12], time2_str[10];
@@ -143,8 +143,17 @@ void setup()
 
   ui_init(); 
   init_focus_style();  
-  dataOptions = readFile(LittleFS,optionsPath);
-  getOptionsfromFile(dataOptions, &sysOpt);
+  
+  // Load options from file. If it fails, the function will load PredefinedOptions internally.
+  if (!getOptionsfromFile(optionsPath, sysOpt)) {
+    // If loading failed (e.g., checksum error or new device), save the defaults back to the file system.
+    WriteOptionsToFile(optionsPath, sysOpt);;
+    serialPrintDebug("Supposed to Write Options");
+  }
+  pBatteryManager = new BatteryManager(&sysOpt);
+  pBatteryManager->enterActiveState(true);
+
+  serialPrintDebug("After Loading Options: Heap: %d   Min: %d\n", ESP.getFreeHeap(), ESP.getMinFreeHeap());
   serialPrintDebug("Ohm Test Voltage: %f, Current: %f\n", ohm_vi_Limits.voltSet, ohm_vi_Limits.currSet);
   serialPrintDebug("Diode Test Voltage: %f, Current: %f\n", diode_vi_Limits.voltSet, diode_vi_Limits.currSet);
   setBacklight(sysOpt.BacklightBrightness, sysOpt.BacklightLowBrght, sysOpt.BacklightTout);
@@ -162,6 +171,7 @@ void setup()
   currentScreen = sysOpt.LastScreen;
   lv_tabview_set_act(ui_MainPageTabs, currentScreen, LV_ANIM_OFF); // Show Tab 1 on startup  
   switchOffRequest = false;
+  serialPrintDebug("Before Main Loop: Heap: %d   Min: %d\n", ESP.getFreeHeap(), ESP.getMinFreeHeap());
 }
 
 int16_t Counter = 0, updDacsCnt = 0;

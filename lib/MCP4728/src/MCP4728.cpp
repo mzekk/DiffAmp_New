@@ -88,7 +88,7 @@ bool MCP4728::setGain(uint8_t gainConf){
 uint16_t MCP4728::float2dac(float voltIn) 
 {
 	uint16_t dacVal;
-	dacVal = int(voltIn * 4095.0 / INT_VREF);
+	dacVal = int(voltIn * 4095.0 / INT_VREF_VAL_DAC4);
 	return dacVal;
 }
 

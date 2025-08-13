@@ -5,14 +5,16 @@
 #include <MCP4728.h>
 #include <MCP4726.h>  // Load the MCP4726 1-Channel DAC Library
 #include <MAX17040.h>
-#include "..\src\ui\ui.h"
+#include "ui/ui.h"
 #include "EncoderRead.h"
 #include <WiFi.h>
 #include "esp_wifi.h"
-#include "..\src\ui\lv_setup.h"
+#include "ui/lv_setup.h"
 #include <Ticker.h>
 #include "esp_pm.h"
 #include "esp_sleep.h"
+#include "SysOptions.h"
+#include "BatteryManager.h"
 //#include <esp_sleep.h>
 //#include "esp_lcd_panel_io.h"
 //#include "esp_lcd_panel_ops.h"
@@ -41,12 +43,11 @@ extern bool connected;
 extern bool vin_range; 
 
 extern unsigned char result;
-extern Rotary r;
 extern EncoderRead encoder;
 extern lv_indev_t *encoder_indev;
 void encoder_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data);
 extern bool wait_and_show_standby_screen(uint32_t timeout, uint8_t mode);
-extern void WriteOptionsToFile(String dataOptions, sysOptions* sysOpt);
+extern bool WriteOptionsToFile(const char *fileName, const sysOptions &options);
 extern PCA9554 ioExp;
 extern MCP4728 dac4ch;
 extern MCP4726 dac1ch;
@@ -54,8 +55,9 @@ extern MAX17040 bMon;
 extern String ssid;
 extern String pass;
 extern lv_obj_t* previous_screen;
-extern String dataOptions;
+extern const char* optionsPath;
 extern SFE_ADS122C04 adc; 
+extern BatteryManager* pBatteryManager;
 
 extern hw_timer_t *My_timer;
 
@@ -77,20 +79,7 @@ void hwSysCheck(uint32_t currentTime);
 
 bool chargerState = NOT_CHARGING;
 
-bool enterSleepMode(void);
 void waitKeyRelease(void);
-
-struct battState {
-  float SoC, SoV;
-  uint8_t chargeState;
-  uint16_t sleepCyclesNo;
-  float battChargeHysteresis;
-  bool chargerDisabled;
-};
-//struct battState checkBattState;
-battState checkBattState = {0, 0, ACTIVE_MODE, 0, 0, false};
-
-void battChargeTask(sysOptions* sysOpt, battState* lastBattState);
 
 void HwInit(void){
     pinMode(PIN_POWER_ON, OUTPUT);  //triggers the LCD backlight
@@ -294,17 +283,19 @@ void tickHandler() {
 }
 
 void timings(sysOptions* sysOpt){
-  checkBattState.chargeState = ACTIVE_MODE;
+  //serialPrintDebug("Heap: %d   Min: %d\n", ESP.getFreeHeap(), ESP.getMinFreeHeap());
   uint32_t currentTime = millis();
   checkSleepModeTimeout(sysOpt, currentTime);      
   checkBacklightDimTimeout(sysOpt, currentTime);
   checkTurnOffRequest(sysOpt, currentTime);
   hwSysCheck(currentTime);
-  battChargeTask(sysOpt, &checkBattState);
-  if(checkBattState.chargeState == BATT_TOO_LOW){
-    // Display Shutdown screen
-    while(1)
-      digitalWrite(KEEP_ON, LOW);
+
+  if (pBatteryManager) {
+    pBatteryManager->update();
+    if (pBatteryManager->getState() == BatteryManager::State::BATTERY_TOO_LOW) {
+      serialPrintDebug("Battery too low, forcing shutdown.\n");
+      digitalWrite(KEEP_ON, LOW); // Power off
+    }
   }
 
   if(switchIsPressed == true)
@@ -314,7 +305,8 @@ void timings(sysOptions* sysOpt){
 
 void checkSleepModeTimeout(sysOptions* sysOptLoc, uint32_t currentTime){
   static uint32_t lastStandbyTime = currentTime;
-  if(sysOptLoc->StandbyTout != 0 && uiActions == false && (chargerState & !sysOptLoc->SleepWithCharger) == false){
+  bool canSleep = (chargerState == NOT_CHARGING) || sysOptLoc->SleepWithCharger;
+  if(sysOptLoc->StandbyTout != 0 && uiActions == false && canSleep){
     if(currentTime - lastStandbyTime > standbyTms[sysOptLoc->StandbyTout]){
       lv_obj_t* prev_screen = lv_scr_act();
       uint8_t hvRegulatorState = digitalRead(EN_HPWR);
@@ -375,8 +367,6 @@ void checkTurnOffRequest(sysOptions* sysOpt, uint32_t currentTime){
   }
 } 
 
-
-
 /**
  * Enters the system into light sleep mode based on the provided system options.
  * 
@@ -397,12 +387,7 @@ bool enterSleepMode(sysOptions* sysOpt){
         return true;  // Cancelled by user
   }
 
-  WriteOptionsToFile(dataOptions, sysOpt);
-  //uint16_t sleepCyclesNo = 0;
-  checkBattState.chargeState = SLEEP_MODE;
-  checkBattState.battChargeHysteresis = 0;
-  checkBattState.chargerDisabled = false;
-  checkBattState.sleepCyclesNo = 0;
+  WriteOptionsToFile(optionsPath, *sysOpt);
 
   digitalWrite(EN_HPWR, LOW);
   serialPrintDebug("Preparing to enter light sleep...\n");
@@ -411,7 +396,7 @@ bool enterSleepMode(sysOptions* sysOpt){
   //timerAlarmDisable(My_timer);
   ioExp.SetLeds(ALL_LEDS_OFF);
   serialPrintDebug("Turn off Display\n");
-  Wire.end();
+
   // Disconnect Wi-Fi
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
@@ -424,6 +409,9 @@ bool enterSleepMode(sysOptions* sysOpt){
   // esp_sleep_enable_timer_wakeup(sysOpt->SleepTimeCycleMs * 1000ULL);
   //serialPrintDebug("Entering RTC light sleep now. RTC wakeup time: %d ms, no of cycles: %d\n", sysOpt->SleepTimeCycleMs, sysOpt->SleepNumCyclesToMeas);
   
+  if (pBatteryManager) pBatteryManager->enterSleepState(false);
+  Wire.end();
+
   serialPrintDebug("Actual CPU Frequency: %dMHz\n", getCpuFrequencyMhz());
   setCpuFrequencyMhz(10);
   serialPrintDebug("New CPU Frequency: %dMHz\n", getCpuFrequencyMhz());
@@ -435,267 +423,30 @@ bool enterSleepMode(sysOptions* sysOpt){
     //esp_light_sleep_start();  // Sleep... 
     delay(sysOpt->SleepTimeCycleMs); // Single sleep cycle (simulated in this case)
 
-    //esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
-    //if ((cause == ESP_SLEEP_WAKEUP_TIMER && ++sleepCyclesNo == sysOpt->SleepNumCyclesToMeas) || --maxNumberofSleep == 0) {
     Wire.begin(PIN_IIC_SDA, PIN_IIC_SCL); 
     delay(10);
     
-    battChargeTask(sysOpt, &checkBattState);
-    if(checkBattState.chargeState == SLEEP_TIME_EXPIRED || checkBattState.chargeState == BATT_TOO_LOW)
-      while(1)
-        digitalWrite(KEEP_ON, LOW);
-    else {
+    if (pBatteryManager) {
+        pBatteryManager->update();
+        BatteryManager::State currentState = pBatteryManager->getState();
+        if (currentState == BatteryManager::State::SLEEP_TIME_EXPIRED || currentState == BatteryManager::State::BATTERY_TOO_LOW) {
+            digitalWrite(KEEP_ON, LOW); // Power off
+        } 
+        else {
           if(digitalRead(SWPB) == HIGH){
             delay(20);
             if(digitalRead(SWPB) == HIGH){
               setCpuFrequencyMhz(240);
               serialPrintDebug("Exit Sleep by keypress\nNew CPU Frequency: %dMHz\n", getCpuFrequencyMhz());
-              ioExp.portMode(ENABLE_CHARGER); // Enable the charger
-              checkBattState.chargeState = ACTIVE_MODE;
-              checkBattState.battChargeHysteresis = 0;
               return false;
             }
           }      
-      }  
+        }  
     Wire.end();  
+    }
+    else serialPrintDebug("Battery Management Init Failure\n");
   }
 }
-
-
-
-void battChargeTask(sysOptions* sysOpt, battState* lastBattState) {
-  #define CHARGER_OFF_STATE 0x01
-  #define CHARGER_WAS_DISABLED 0x02
-  #define CHARGER_RESTORED 0x04
-  #define CHARGER_ON_STATE 0x08
- 
-  static bool sleepCycleToggle = false, testChargerWhenDisabled = false;
-  static uint16_t sleepTime = 0, status = 0, oldStatus;
-  static uint32_t maxNumberofSleep = sysOpt->SleepMaxTime * MS_IN_ONE_HOUR / sysOpt->SleepTimeCycleMs;  
-  float MaxBattCharge = MAX_BATT_CHARGE;
-  if(sysOpt->BattProtect)
-    MaxBattCharge = SAFE_BATT_CHARGE;  
-  bMon.getBatterySoC(lastBattState->SoC);
-  bMon.getBatteryVoltage(lastBattState->SoV);
-  //lastBattState.chargeState = lastBattState->chargeState;
-  bool chargerPortState = bool(digitalRead(LDAC_CHRG));
-
-  uint32_t currentTime = millis();
-  static uint32_t lastChargergPresenceTime = currentTime, retestChargerTime = currentTime;
-  static bool lastChargerPortState = !chargerPortState;
-  static bool lastChargerState = lastChargerPortState;
-  static bool evaluateChargerState = false;
-  //static uint8_t lastChargerState = CHARGER_OFF_STATE;
-
-  if(testChargerWhenDisabled && currentTime - retestChargerTime > 9500){
-    if(digitalRead(LDAC_CHRG) == HIGH)
-      lastBattState->chargerDisabled = false;          
-    else 
-      ioExp.portMode(DISABLE_CHARGER); // Turn off the charger   
-    serialPrintDebug("Tested Charger Presence: %d\n", int(digitalRead(LDAC_CHRG)));  
-    testChargerWhenDisabled = false;  
-    retestChargerTime = currentTime;
-    evaluateChargerState = true;
-  }
-  
-  switch (lastBattState->chargeState)
-  {
-    // When operating in normal mode, the battery charge is monitored
-    // if the charge is above the max threshold, the charge cycle is stopped,
-    // this is shown on the display by the GREEN charging icon.
-    // When the battery is being charger, the charging icon become YELLOW
-    // When the charger is disconnected, the charging icon become idle (DARK GRAY)
-    case ACTIVE_MODE:
-      // When the charger is disabled, the testChargerWhenDisabled flag is set periodically 
-      // to test if the charger is still present
-      
-    
-      if(chargerPortState != lastChargerPortState || evaluateChargerState){ 
-        if(currentTime - lastChargergPresenceTime > 1000) { 
-          lastChargerPortState = bool(digitalRead(LDAC_CHRG));
-          lastChargergPresenceTime = currentTime;
-          if(lastChargerPortState == false){ // Battery is charging when LDAC_CHRG is low
-            serialPrintDebug("Charger Presence Detected\n");
-            lv_obj_set_style_img_recolor(ui_ChargingImg, lv_color_hex(0xF7F039), LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_img_recolor_opa(ui_ChargingImg, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-            //chargerState = CHARGING ;
-          }
-          else if(lastBattState->chargerDisabled == true){
-            serialPrintDebug("Charger was Disabled to protect battery from overcharging\n");
-            lv_obj_set_style_img_recolor(ui_ChargingImg, lv_color_hex(0x36F415), LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_img_recolor_opa(ui_ChargingImg, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-            chargerState = NOT_CHARGING;
-          }
-          else {
-            serialPrintDebug("Charger Removed \n");
-            lv_obj_set_style_img_recolor(ui_ChargingImg, lv_color_hex(0x1E1E02), LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_img_recolor_opa(ui_ChargingImg, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-            chargerState = NOT_CHARGING;
-          }
-        }   
-        evaluateChargerState = false;    
-      }
-      else chargerPortState = lastChargerPortState;
-      //else 
-      //  lastChargergPresenceTime = currentTime;
-
-      if(chargerPortState == HIGH){   
-          status = CHARGER_OFF_STATE;
-          // Check weather the charger is enabled or not
-          if (lastBattState->chargerDisabled == true){   
-            //serialPrintDebug("AM with Charger was Disabled\n");
-            status |= CHARGER_WAS_DISABLED;  
-            if(currentTime - retestChargerTime > 9000){ // Battery is not charging when LDAC_CHRG is low
-              //retestChargerTime = currentTime;
-              ioExp.portMode(ENABLE_CHARGER); // Enable the charger
-              testChargerWhenDisabled = true;
-            }
-            if(lastBattState->SoC < (MaxBattCharge - lastBattState->battChargeHysteresis)){
-              ioExp.portMode(ENABLE_CHARGER); // Enable the charger
-              //lastBattState->chargerDisabled = false;
-              lastBattState->battChargeHysteresis = 0;
-              status |= CHARGER_RESTORED;
-              //serialPrintDebug("Max charge reached: %f\n", lastBattState->SoC);
-            }
-          } 
-                
-          // Check if battery charge or voltage is too low to guarantee operational conditions -> Turn off power
-          if(lastBattState->SoC < sysOpt->BattMinChargeLeft || lastBattState->SoV < sysOpt->BattLowThreshold) {  
-            serialPrintDebug("Batt too low - Charge Left: %f, Voltage: %f", lastBattState->SoC, lastBattState->SoV);
-            lastBattState->chargeState = BATT_TOO_LOW;         
-          }       
-        }
-        else if(testChargerWhenDisabled == false) {
-          status = CHARGER_ON_STATE;
-          //serialPrintDebug("AM Charger Detected. Charge: %f\n", lastBattState->SoC);  
-          //lastBattState.chargeState = ACTIVE_CHARGING;
-          if(lastBattState->SoC > MaxBattCharge){            
-            ioExp.portMode(DISABLE_CHARGER); // Turn off the charger   
-            lastBattState->chargerDisabled = true;
-            lastBattState->battChargeHysteresis = BATTERY_RECHARGE_HYSTERESIS;
-            retestChargerTime = currentTime;
-            testChargerWhenDisabled = false;
-            //serialPrintDebug("Restaring charge: %f\n", lastBattState->SoC);
-            status |= CHARGER_WAS_DISABLED;
-          }        
-        }
-      if(status != oldStatus){
-        switch(status){
-          case 0:
-            serialPrintDebug("(A) Sampling Charger pin: %f\n", lastBattState->SoC);
-          case CHARGER_OFF_STATE:
-            serialPrintDebug("(A) Charger OFF - Charge State: %f\n", lastBattState->SoC);
-          break;
-          case CHARGER_OFF_STATE + CHARGER_WAS_DISABLED:
-            serialPrintDebug("(A) Charger was Disabled - Charge State: %f\n", lastBattState->SoC);
-            break;
-          case CHARGER_OFF_STATE + CHARGER_RESTORED + CHARGER_WAS_DISABLED:
-            serialPrintDebug("(A) Charger Restored - Charge State: %f\n", lastBattState->SoC);
-            break;  
-          case CHARGER_ON_STATE:
-            serialPrintDebug("(A) Charger ON - Charge State: %f\n", lastBattState->SoC);
-          break;
-          case CHARGER_ON_STATE + CHARGER_WAS_DISABLED:
-            serialPrintDebug("(A) Charger is now Disabled - Charge State: %f\n", lastBattState->SoC);
-            break;  
-        }
-      }
-      oldStatus = status;
-    break;
-    
-    // When operating in SLEEP mode, the battery is monitored as in NORMAL mode
-    // the only difference is that the icon is not updated since the display is off
-    case SLEEP_MODE:    
-      if(chargerPortState == HIGH){   
-        status = CHARGER_OFF_STATE;
-        //lastBattState.chargeState = SLEEP_NOT_CHARGING;
-        ioExp.SetLeds(ALL_LEDS_OFF);
-        // Check if max number of sleep time has been reached
-        if (--maxNumberofSleep == 0 ){
-          setCpuFrequencyMhz(240);
-          serialPrintDebug("Max Sleep Time Reached\nCPU Frequency: %dMHz\n", getCpuFrequencyMhz());
-          lastBattState->chargeState = SLEEP_TIME_EXPIRED; // Force system power off
-        }  
-        // Check weather the charger is enabled or not
-        if (lastBattState->chargerDisabled == true){    
-          status |= CHARGER_WAS_DISABLED;             
-          if(lastBattState->SoC < (MaxBattCharge - lastBattState->battChargeHysteresis)){
-            ioExp.portMode(ENABLE_CHARGER); // Enable the charger
-            lastBattState->chargerDisabled = false;
-            lastBattState->battChargeHysteresis = 0;
-            status |= CHARGER_RESTORED;
-          }
-        }      
-        // Check if it is time to test the battery charge state
-        checkBattState.sleepCyclesNo = checkBattState.sleepCyclesNo + 1;    
-        if (checkBattState.sleepCyclesNo >= sysOpt->SleepNumCyclesToMeas){              
-          checkBattState.sleepCyclesNo = 0;
-          if(lastBattState->chargerDisabled == true){
-            ioExp.portMode(ENABLE_CHARGER); // Enable the charger for testing charger is still connected
-            ioExp.SetLeds(DISP_PROBE_POLARITY_POS);  // Display battery monitor sampling with charger disconnected    
-            testChargerWhenDisabled = true;
-            retestChargerTime = currentTime + 9000;
-          }
-          // Display battery monitor sampling with charger connected (charge paused)
-          else ioExp.SetLeds(DISP_PROBE_POLARITY_NEG);
-          ioExp.SetLeds(ALL_LEDS_OFF);
-          // Check if battery charge or voltage is too low to guarantee operational conditions -> Turn off power
-          if(lastBattState->SoC < sysOpt->BattMinChargeLeft || lastBattState->SoV < sysOpt->BattLowThreshold) {  
-            lastBattState->chargeState = BATT_TOO_LOW;        
-          }   
-        }
-        // Check if the battery charge is below threshold and need recharging
-      }
-      else {
-        status = CHARGER_ON_STATE;
-        //lastBattState.chargeState = SLEEP_CHARGING;
-        maxNumberofSleep = sysOpt->SleepMaxTime * MS_IN_ONE_HOUR / sysOpt->SleepTimeCycleMs;   
-
-        if(lastBattState->SoC > MaxBattCharge){     
-          status |= CHARGER_WAS_DISABLED;       
-          ioExp.portMode(DISABLE_CHARGER); // Turn off the charger   
-          lastBattState->chargerDisabled = true;
-          lastBattState->battChargeHysteresis = BATTERY_RECHARGE_HYSTERESIS;
-          ioExp.SetLeds(ALL_LEDS_OFF);  
-        }  
-        else if(sleepCycleToggle)
-          ioExp.SetLeds(DISP_PROBE_POLARITY_POS);  // Display charger is connected and charging  
-        else ioExp.SetLeds(ALL_LEDS_OFF);
-          
-        checkBattState.sleepCyclesNo = 0;
-        sleepCycleToggle = !sleepCycleToggle;
-      }
-      if(status != oldStatus){
-        switch(status){
-          case 0:
-            serialPrintDebug("(A) Sampling Charger pin: %f\n", lastBattState->SoC);
-          case CHARGER_OFF_STATE:
-            serialPrintDebug("(SLP) Charger OFF - Charge State: %f\n", lastBattState->SoC);
-          break;
-          case CHARGER_OFF_STATE + CHARGER_WAS_DISABLED:
-            serialPrintDebug("(SLP) Charger was Disabled - Charge State: %f\n", lastBattState->SoC);
-            break;
-          case CHARGER_OFF_STATE + CHARGER_RESTORED + CHARGER_WAS_DISABLED:
-            serialPrintDebug("(SLP) Charger Restored - Charge State: %f\n", lastBattState->SoC);
-            break;  
-          case CHARGER_ON_STATE:
-            serialPrintDebug("(SLP) Charger ON - Charge State: %f\n", lastBattState->SoC);
-          break;
-          case CHARGER_ON_STATE + CHARGER_WAS_DISABLED:
-            serialPrintDebug("(SLP) Charger is now Disabled - Charge State: %f\n", lastBattState->SoC);
-            break;  
-        }
-      }
-      oldStatus = status;
-    break;
-  
-    default:
-      serialPrintDebug("Unknown state\n");
-    break;
-  }
-}
-  
-
 
 bool confirm_valid_wakeup(uint32_t debounce_time_ms) {
   uint32_t start = millis();
@@ -738,6 +489,7 @@ void resumeSleepmode(int8_t backlight) {
   //serialPrintDebug("Setting Backlight:%d\n", backlight);
   initWiFi_AP();
   connected = false;
+  pBatteryManager->enterActiveState(false);
   //WiFi.mode(WIFI_STA);
   //esp_wifi_start();
   //WiFi.begin(ssid.c_str(), pass.c_str());  // You must manage these
@@ -868,6 +620,3 @@ void enableHV_Regs(float vset){
     else vampSet += VAMP_STEP;  
   }
 }
-
-
-

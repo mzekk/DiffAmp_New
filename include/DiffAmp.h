@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdarg.h>
 #include <stdio.h>
-#include <Rotary.h>
+//#include <Rotary.h>
 
 
 //**** I2C SLAVE ADDRESSES ****
@@ -68,7 +68,7 @@
 #define SLEEP_CHARGING 0xA0
 #define SLEEP_NOT_CHARGING 0xB0
 #define BATT_TOO_LOW 0xFF
-#define SLEEP_TIME_EXPIRED 0xFE
+//#define SLEEP_TIME_EXPIRED 0xFE
 
 #define CHARGING           true
 #define NOT_CHARGING       false
@@ -81,6 +81,14 @@
 #define BATTERY_RECHARGE_HYSTERESIS 0.5 // Value (%) subtracted from MAX_BATT_CHARGE or SAFE_BATT_CHARGE when battery is considered charged to restart a new charge cycle
 
 #define DEFAULT_BRIGHTNESS 80
+
+// Values returned by 'process'
+// No complete step yet.
+#define DIR_NONE 0x0
+// Clockwise step.
+#define DIR_CW 0x10
+// Counter-clockwise step.
+#define DIR_CCW 0x20
 
 
 // RESISTANCE SELECTOR
@@ -112,181 +120,6 @@ void IRAM_ATTR pinIntr();
 void setRelayDivider(bool);
 float vdiffInCalc(int32_t vinconv, float vdiffMult);
 void serialPrintDebug(const char * message, ...);
-
-struct sysOptions{
-    float   
-        ADC_VbattCorr,
-        ADC_VmeasR1NegGain,
-        ADC_VmeasR1NegOffset,
-        ADC_VmeasR2NegGain,
-        ADC_VmeasR2NegOffset,
-        ADC_VmeasR1Offset,
-        ADC_VmeasR1PosGain,
-        ADC_VmeasR1PosOffset,
-        ADC_VmeasR2Offset,
-        ADC_VmeasR2PosGain,
-        ADC_VmeasR2PosOffset,
-        ADC_VrefGain,
-        ADC_VrefOffset,
-        ADC_x2_GainCorr,
-        ADC_x4_GainCorr,
-        ADC_x8_GainCorr,
-        ADC_x16_GainCorr,
-        ADC_x32_GainCorr,
-        ADC_x64_GainCorr,
-        ADC_x128_GainCorr,
-        BattLowThreshold,
-        BattOkThreshold,
-        DAC_V_Iref_Gain,
-        DAC_V_Iref_Offset,
-        DAC_V_Iset_Gain,
-        DAC_V_Iset_Offset,
-        DAC_Voffs_Gain,
-        DAC_Voffs_Offset,
-        DAC_Vsetn_Gain,
-        DAC_Vsetn_Offset,
-        DAC_Vsetp_Gain,
-        DAC_Vsetp_Offset,
-        Diode_I_LED,
-        Diode_I_LowVF,
-        Diode_I_Zener,
-        Diode_V_LED,
-        Diode_V_LowVF,
-        Diode_V_Zener,
-        Ohm_I_1R,
-        Ohm_I_1kR,
-        Ohm_I_10kR,
-        Ohm_I_100kR,
-        Ohm_I_1MR,
-        Ohm_I_10MR,
-        Ohm_V_1R,
-        Ohm_V_1kR,
-        Ohm_V_10kR,
-        Ohm_V_100kR,
-        Ohm_V_1MR,
-        Ohm_V_10MR,
-        SMU_I_Lim,
-        SMU_V_Lim;
-    bool    
-        BattProtect,
-        Diode_MeasMode,
-        Diode_Buzz,
-        Ohm_Buzz,
-        Ohm_MeasMode,
-        Opt_FlipScreen,
-        SleepWithCharger,
-        TimeDaylightOffset;
-    uint16_t 
-        ADC_Averages,
-        ADC_Sample_Rate,
-        ADC_VdiffGain,
-        ADC_VnPGain,
-        BacklightBrightness,
-        BacklightLowBrght,
-        BacklightTout,
-        BattMinChargeLeft,
-        DiodeType,
-        LastScreen,
-        Ohm_Range,
-        Revision,
-        SleepMaxTime,
-        SleepNumCyclesToMeas,
-        SleepTimeCycleMs,
-        StandbyTout,
-        SwitchTurnOffTime,
-        Volt_Range;
-    int16_t
-        TimeZone;    
-    char  MAC_Address_Device[20];
-    char  MAC_Address_Remote[20];
-    uint64_t
-        dataChecksum;        
-};
-
-enum OptAddr{
-        ADC_Averages,
-        ADC_Sample_Rate,
-        ADC_VbattCorr,
-        ADC_VdiffGain,
-        ADC_VmeasR1NegGain,
-        ADC_VmeasR1NegOffset,
-        ADC_VmeasR2NegGain,
-        ADC_VmeasR2NegOffset,
-        ADC_VmeasR1Offset,
-        ADC_VmeasR1PosGain,
-        ADC_VmeasR1PosOffset,
-        ADC_VmeasR2Offset,
-        ADC_VmeasR2PosGain,
-        ADC_VmeasR2PosOffset,
-        ADC_VnPGain,
-        ADC_VrefGain,
-        ADC_VrefOffset,
-        ADC_x2_GainCorr,
-        ADC_x4_GainCorr,
-        ADC_x8_GainCorr,
-        ADC_x16_GainCorr,
-        ADC_x32_GainCorr,
-        ADC_x64_GainCorr,
-        ADC_x128_GainCorr,
-        BacklightBrightness,
-        BacklightLowBrght,
-        BacklightTout,
-        BattLowThreshold,
-        BattOkThreshold,
-        BattProtect,
-        BattMinChargeLeft,
-        DAC_V_Iref_Gain,
-        DAC_V_Iref_Offset,
-        DAC_V_Iset_Gain,
-        DAC_V_Iset_Offset,
-        DAC_Voffs_Gain,
-        DAC_Voffs_Offset,
-        DAC_Vsetn_Gain,
-        DAC_Vsetn_Offset,
-        DAC_Vsetp_Gain,
-        DAC_Vsetp_Offset,
-        Diode_Buzz,
-        Diode_I_LED,
-        Diode_I_LowVF,
-        Diode_I_Zener,
-        Diode_MeasMode,
-        Diode_V_LED,
-        Diode_V_LowVF,
-        Diode_V_Zener,
-        DiodeType,
-        LastScreen,
-        MAC_Address_Device,
-        MAC_Address_Remote,
-        Ohm_Buzz,
-        Ohm_I_100kR,
-        Ohm_I_10kR,
-        Ohm_I_10MR,
-        Ohm_I_1kR,
-        Ohm_I_1MR,
-        Ohm_I_1R,
-        Ohm_MeasMode,
-        Ohm_Range,
-        Ohm_V_100kR,
-        Ohm_V_10kR,
-        Ohm_V_10MR,
-        Ohm_V_1kR,
-        Ohm_V_1MR,
-        Ohm_V_1R,
-        Opt_FlipScreen,
-        Revision,
-        SleepMaxTime,
-        SleepNumCyclesToMeas,
-        SleepTimeCycleMs,
-        SleepWithCharger,
-        SMU_I_Lim,
-        SMU_V_Lim,
-        StandbyTout,
-        SwitchTurnOffTime,
-        TimeDaylightOffset,
-        TimeZone,
-        Volt_Range,
-        dataChecksum,
-};
 
 //Structure example to send data
 //Must match the receiver structure

@@ -20,9 +20,9 @@ published by the Free Software Foundation.
 //#define LDAC_CHRG                    12 // This is a double function IO
 
 #define VREF_CONF 1					// 1 = Internal 2.048V reference, 0 = External VDD (supply pin) reference
-#define INT_VREF 2.048 				// Internal reference voltage
-#define INT_VREF_ALL 0x0F			// All DAC channels use the same internal reference voltage
-#define GAIN_ALL 0x00				// All DAC channels use the same gain = 0
+#define INT_VREF_VAL_DAC4 	2.048 				// Internal reference voltage
+#define INT_VREF_ALL 		0x0F			// All DAC channels use the same internal reference voltage
+#define GAIN_ALL 			0x00				// All DAC channels use the same gain = 0
 
 
 //MCP4728 Update Modes

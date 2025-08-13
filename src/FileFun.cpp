@@ -6,15 +6,21 @@
 #include <CSV_Parser.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <map>
+#include <string>
 #include "stdarg.h"
+#include "esp_rom_crc.h" // For crc32_le
+#include "../lib/PSRAM_Allocator/PSRAM_Allocator.h"
+#include "SysOptions.h"
+#include "../lib/optionsManager/OptionsModel.h"
 //#include "EspNowManager.h"
 
 sysOptions PredefinedOptions = {
         1	        , //ADC_VbattCorr
-        0.99872	    , //ADC_VmeasNegR1Gain
-        -0.00111	, //ADC_VmeasNegR1Offset
-        0.99872	    , //ADC_VmeasNegR2Gain
-        -0.00111	, //ADC_VmeasNegR2Offset
+        0.99872	    , //ADC_VmeasR1NegGain
+        -0.00111	, //ADC_VmeasR1NegOffset 
+        0.99872	    , //ADC_VmeasR2NegGain
+        -0.00111	, //ADC_VmeasR2NegOffset
         -0.0111	    , //ADC_VmeasR1Offset
         0.99956	    , //ADC_VmeasR1PosGain
         -0.021	    , //ADC_VmeasR1PosOffset
@@ -81,7 +87,7 @@ sysOptions PredefinedOptions = {
         0	        , //DiodeType
         0	        , //LastScreen
         0	        , //Ohm_Range
-        0x0111	  , //Revisions: Hw revision [bit 0-3]; SW revision Minor [bit 4-7]; SW revision Major [bit 8-11]; Submodel [bit 12-15]
+        0x0111	  , //Revision
         12	      , //SleepMaxTime
         43	      , //SleepNumCyclesToMeas
         700	      , //SleepTimeCycleMs
@@ -91,9 +97,16 @@ sysOptions PredefinedOptions = {
         -8	        , //TimeZone
         "24:62:AB:F5:01:48"	, //MAC_Address_Device
         "68:B6:B3:23:38:8C"	, //MAC_Address_Remote
-        0x99D6A9	 //dataChecksum
+        0	        //dataChecksum - This will be calculated on first use.
 };
 
+// Define types that use our custom PSRAM allocator
+using psram_string = std::basic_string<char, std::char_traits<char>, PSRAM_Allocator<char>>;
+using psram_map_string_string = std::map<psram_string, psram_string, std::less<psram_string>,
+                                         PSRAM_Allocator<std::pair<const psram_string, psram_string>>>;
+
+// The global map for comments now uses PSRAM, freeing up the main heap.
+psram_map_string_string optionComments;
 
 const char* ntpServer = "pool.ntp.org";
 const long  gmtOffset_sec = -28800; // US Pacific
@@ -121,8 +134,7 @@ extern float incomingVdiff;
 extern float incomingVbatt;
 extern float incomingVSE;
 
-char **getCSV_Values(String dataOptions, CSV_Parser cp);
-void saveCSVFile(const char * path, CSV_Parser &cp);
+uint32_t calcOptionDataChecksum(const sysOptions &options);
 
 
 //Variables to save values from HTML form
@@ -202,7 +214,7 @@ bool loadCredentials() {
   configFile.readBytes(buf.get(), size);
   buf[size] = '\0';
 
-  DynamicJsonDocument doc(256);
+  JsonDocument doc;
   DeserializationError error = deserializeJson(doc, buf.get());
 
   if (error) {
@@ -481,44 +493,6 @@ bool WiFi_Service(void){
   return false;
 }
 
-// Read File from LittleFS
-String readFileNoComments(fs::FS &fs, const char * path){
-  serialPrintDebug("Reading file: %s\r\n", path);
-
-  File file = fs.open(path);
-  if(!file || file.isDirectory()){
-    serialPrintDebug("- failed to open file for reading\n");
-    return String();
-  }
-  String result = "";
-
-  while (file.available()) {
-    String line = file.readStringUntil('\n');
-    line.trim();
-
-    if (line.length() == 0 || line[0] == '#') continue;
-
-    int firstComma = line.indexOf(',');
-    int secondComma = line.indexOf(',', firstComma + 1);
-    int thirdComma = line.indexOf(',', secondComma + 1);
-
-    if (firstComma == -1 || secondComma == -1) {
-      serialPrintDebug("Invalid line: %s\n", line.c_str());
-      continue;
-    }
-
-    // Trim off the comment (4th column)
-    String trimmedLine = (thirdComma != -1)
-                         ? line.substring(0, thirdComma)
-                         : line;
-
-    result += trimmedLine + "\n";
-  }
-
-  file.close();
-  return result;
-}
-
 // Read File from LittleFS including comments
 String readFile(fs::FS &fs, const char * path){
   serialPrintDebug("Reading file: %s\r\n", path);
@@ -549,40 +523,6 @@ void writeFile(fs::FS &fs, const char * path, const char * message){
   } else {
     serialPrintDebug("- frite failed\n");
   }
-}
-
-void saveCSVFile(const char * path, CSV_Parser &cp){
-  File file = LittleFS.open(path, FILE_WRITE);  // this overwrites the file
-  if (!file) {
-    serialPrintDebug("Failed to open file for writing\n");
-    return;
-  }
-  char **optionNames = (char**)cp["Option_name"];
-  char **optionType = (char**)cp["Type"];
-  char **optionValues = (char**)cp["Option_value"];
-  char **comments = (char**)cp["comment"];
-
-  // Write header line
-  file.println("Option_name,Type,Option_value,comment");
-  // Write CSV data
-  size_t rows = cp.getRowsCount();
-  for (size_t i = 0; i < rows; i++) {
-    // Safely write each column in one line
-    if (optionNames[i])  file.print(optionNames[i]);
-    file.print(",");
-
-    if (optionType[i])   file.print(optionType[i]);
-    file.print(",");
-
-    if (optionValues[i]) file.print(optionValues[i]);
-    file.print(",");
-
-    if (comments[i])     file.println(comments[i]);
-    else                 file.println();
-  }
-
-  file.close();
-  serialPrintDebug("CSV saved successfully.\n");
 }
 
 // Initialize WiFi
@@ -698,7 +638,7 @@ void detectTimezone() {
   if (httpCode == 200) {
     String payload = http.getString();
 
-    DynamicJsonDocument doc(1024);
+    JsonDocument doc;
     deserializeJson(doc, payload);
 
     timeZoneStr = doc["timezone"].as<String>(); // e.g., "America/Los_Angeles"
@@ -771,396 +711,216 @@ String processor(const String& var) {
 }
 
 /**
- * @brief Parse a CSV file with options and fill a sysOptions struct with the parsed values.
- * @param dataOptions The content of the CSV file as a string.
- * @param sysOpt The sysOptions struct to be filled with the parsed values.
+ * @brief Reads options from a CSV file into the options struct in a memory-efficient way.
+ *        This function reads the file line-by-line to avoid loading the entire
+ *        file into memory. It is driven by the optionDescriptors table.
+ * @param fileName The full path to the options file (e.g., "/MemOptionsDiffAmp.csv").
+ * @param options A reference to the sysOptions struct to populate.
+ * @return True on success, false if the file can't be opened or is invalid.
  */
-/**
- * The expected format of the CSV file is as follows:
- *
- * Option_name,Type,Option_value,comment
- * ADC_TifGain,float,0.999,-
- * ADC_TifOffset,float,-0.021,-
- * ...,
- * ...,
- */
-/**
- * The options are:
- * - ADC_TifGain, ADC_TifOffset, ADC_VmeasNegGain, ADC_VmeasNegOffset, ADC_VmeasOffset, ADC_VmeasPosGain, ADC_VmeasPosOffset, ADC_VrefGain, ADC_VrefOffset, DAC_pVsSet, DAC_VposSet, iADC_VbattCorr, LowBattThreshold, OkBattThreshold, Res_0p1, Res_1p0, Res_10p0, Res_100p0, Res_1k0, Res_10k0, Res_100k0, Res_1M0
- * - ADC_Averages, ADC_Sample_Rate, LastResistanceSet, LastScreen, LastVmeasDirection, LastVoltageSet, LCD_Brightness
- * - EN_IgenPort, EN_ItstSense, IN_RevPort, RHoldOption, VHoldOption, VR_SelPort
- * - MAC_Address_Device, MAC_Address_Remote
- */
-/**
- * The values are parsed using the atof() and atoi() functions.
- * The boolean values are parsed by checking if the value is 0 or not.
- * The strings are parsed as is.
- */
-void getOptionsfromFile(String dataOptions, sysOptions* sysOpt){
-  // Create a CSV parser object
-  CSV_Parser cp(dataOptions.c_str(), "sss-");
-  serialPrintDebug("Number of lines: %d\n", cp.getRowsCount());
-  int newlineIndex = dataOptions.indexOf('\n');
-  serialPrintDebug("Header (raw): '");
-  char header[60];
-  sprintf(header,"%s", dataOptions.substring(0, newlineIndex).c_str());
-  serialPrintDebug(header);
-  serialPrintDebug("'\n");
-  char **optionNames = (char**)cp["Option_name"];
-  char **optionType = (char**)cp["Type"];
-  char **optionValues = (char**)cp["Option_value"];
-  //char **comments = (char**)cp["comment"];
-  // Parse the CSV data
-  for(int row = 0; row < cp.getRowsCount(); row++)
-    serialPrintDebug("%s, %s\n", optionNames[row], optionValues[row]);
+bool getOptionsfromFile(const char *fileName, sysOptions &options) {
+    File optionsFile = LittleFS.open(fileName, "r");
+    if (!optionsFile) {
+        serialPrintDebug("ERROR: File not found: %s. Loading defaults.\n", fileName);
+        options = PredefinedOptions;
+        options.dataChecksum = calcOptionDataChecksum(options);
+        return false;
+    }
 
-  sysOpt->ADC_VbattCorr = atof(optionValues[OptAddr::ADC_VbattCorr]);
-  sysOpt->ADC_VmeasR1NegGain = atof(optionValues[OptAddr::ADC_VmeasR1NegGain]);
-  sysOpt->ADC_VmeasR1NegOffset = atof(optionValues[OptAddr::ADC_VmeasR1NegOffset]);
-  sysOpt->ADC_VmeasR2NegGain = atof(optionValues[OptAddr::ADC_VmeasR2NegGain]);
-  sysOpt->ADC_VmeasR2NegOffset = atof(optionValues[OptAddr::ADC_VmeasR2NegOffset]);
-  sysOpt->ADC_VmeasR1Offset = atof(optionValues[OptAddr::ADC_VmeasR1Offset]);
-  sysOpt->ADC_VmeasR1PosGain = atof(optionValues[OptAddr::ADC_VmeasR1PosGain]);
-  sysOpt->ADC_VmeasR1PosOffset = atof(optionValues[OptAddr::ADC_VmeasR1PosOffset]);
-  sysOpt->ADC_VmeasR2Offset = atof(optionValues[OptAddr::ADC_VmeasR2Offset]);
-  sysOpt->ADC_VmeasR2PosGain = atof(optionValues[OptAddr::ADC_VmeasR2PosGain]);
-  sysOpt->ADC_VmeasR2PosOffset = atof(optionValues[OptAddr::ADC_VmeasR2PosOffset]);
-  sysOpt->ADC_VnPGain = atof(optionValues[OptAddr::ADC_VnPGain]);
-  sysOpt->ADC_VrefGain = atof(optionValues[OptAddr::ADC_VrefGain]);
-  sysOpt->ADC_VrefOffset = atof(optionValues[OptAddr::ADC_VrefOffset]);
-  sysOpt->ADC_x2_GainCorr = atof(optionValues[OptAddr::ADC_x2_GainCorr]);
-  sysOpt->ADC_x4_GainCorr = atof(optionValues[OptAddr::ADC_x4_GainCorr]);
-  sysOpt->ADC_x8_GainCorr = atof(optionValues[OptAddr::ADC_x8_GainCorr]);
-  sysOpt->ADC_x16_GainCorr = atof(optionValues[OptAddr::ADC_x16_GainCorr]);
-  sysOpt->ADC_x32_GainCorr = atof(optionValues[OptAddr::ADC_x32_GainCorr]);
-  sysOpt->ADC_x64_GainCorr = atof(optionValues[OptAddr::ADC_x64_GainCorr]);
-  sysOpt->ADC_x128_GainCorr = atof(optionValues[OptAddr::ADC_x128_GainCorr]);
-  sysOpt->BattLowThreshold = atof(optionValues[OptAddr::BattLowThreshold]);
-  sysOpt->BattOkThreshold = atof(optionValues[OptAddr::BattOkThreshold]);
-  sysOpt->DAC_V_Iref_Gain = atof(optionValues[OptAddr::DAC_V_Iref_Gain]);
-  sysOpt->DAC_V_Iref_Offset = atof(optionValues[OptAddr::DAC_V_Iref_Offset]);
-  sysOpt->DAC_V_Iset_Gain = atof(optionValues[OptAddr::DAC_V_Iset_Gain]);
-  sysOpt->DAC_V_Iset_Offset = atof(optionValues[OptAddr::DAC_V_Iset_Offset]);
-  sysOpt->DAC_Voffs_Gain = atof(optionValues[OptAddr::DAC_Voffs_Gain]);
-  sysOpt->DAC_Voffs_Gain = atof(optionValues[OptAddr::DAC_Voffs_Gain]);
-  sysOpt->DAC_Voffs_Offset = atof(optionValues[OptAddr::DAC_Voffs_Offset]);
-  sysOpt->DAC_Vsetn_Gain = atof(optionValues[OptAddr::DAC_Vsetn_Gain]);
-  sysOpt->DAC_Vsetn_Offset = atof(optionValues[OptAddr::DAC_Vsetn_Offset]);
-  sysOpt->DAC_Vsetp_Gain = atof(optionValues[OptAddr::DAC_Vsetp_Gain]);
-  sysOpt->DAC_Vsetp_Offset = atof(optionValues[OptAddr::DAC_Vsetp_Offset]);
-  sysOpt->Diode_I_LED = atof(optionValues[OptAddr::Diode_I_LED]);
-  sysOpt->Diode_I_LowVF = atof(optionValues[OptAddr::Diode_I_LowVF]);
-  sysOpt->Diode_I_Zener = atof(optionValues[OptAddr::Diode_I_Zener]);
-  sysOpt->Diode_V_LED = atof(optionValues[OptAddr::Diode_V_LED]);
-  sysOpt->Diode_V_LowVF = atof(optionValues[OptAddr::Diode_V_LowVF]);
-  sysOpt->Diode_V_Zener = atof(optionValues[OptAddr::Diode_V_Zener]);
-  sysOpt->Ohm_I_1R = atof(optionValues[OptAddr::Ohm_I_1R]);
-  sysOpt->Ohm_I_1kR = atof(optionValues[OptAddr::Ohm_I_1kR]);
-  sysOpt->Ohm_I_10kR = atof(optionValues[OptAddr::Ohm_I_10kR]);
-  sysOpt->Ohm_I_100kR = atof(optionValues[OptAddr::Ohm_I_100kR]);
-  sysOpt->Ohm_I_1MR = atof(optionValues[OptAddr::Ohm_V_1MR]);
-  sysOpt->Ohm_I_10MR = atof(optionValues[OptAddr::Ohm_I_10MR]);
-  sysOpt->Ohm_V_1R = atof(optionValues[OptAddr::Ohm_V_1R]);
-  sysOpt->Ohm_V_1kR = atof(optionValues[OptAddr::Ohm_V_1kR]);
-  sysOpt->Ohm_V_10kR = atof(optionValues[OptAddr::Ohm_V_10kR]);
-  sysOpt->Ohm_V_100kR = atof(optionValues[OptAddr::Ohm_V_100kR]);
-  sysOpt->Ohm_V_1MR = atof(optionValues[OptAddr::Ohm_V_1MR]);
-  sysOpt->Ohm_V_10MR = atof(optionValues[OptAddr::Ohm_V_10MR]);
-  sysOpt->SMU_I_Lim = atof(optionValues[OptAddr::SMU_I_Lim]);
-  sysOpt->SMU_V_Lim = atof(optionValues[OptAddr::SMU_V_Lim]);
+    optionComments.clear(); // Clear old comments from PSRAM before loading new file
 
-  sysOpt->ADC_Averages = atoi(optionValues[OptAddr::ADC_Averages]);
-  sysOpt->ADC_Sample_Rate = atoi(optionValues[OptAddr::ADC_Sample_Rate]);
-  sysOpt->ADC_VdiffGain = atoi(optionValues[OptAddr::ADC_VdiffGain]);
-  sysOpt->LastScreen = atoi(optionValues[OptAddr::LastScreen]);
-  sysOpt->BacklightBrightness = atoi(optionValues[OptAddr::BacklightBrightness]);
-  sysOpt->BacklightLowBrght = atoi(optionValues[OptAddr::BacklightLowBrght]);
-  sysOpt->BacklightTout = atoi(optionValues[OptAddr::BacklightTout]);
-  sysOpt->BattMinChargeLeft = atoi(optionValues[OptAddr::BattMinChargeLeft]);
-  sysOpt->DiodeType = atoi(optionValues[OptAddr::DiodeType]);
-  sysOpt->LastScreen = atoi(optionValues[OptAddr::LastScreen]);
-  sysOpt->Ohm_Range = atoi(optionValues[OptAddr::Ohm_Range]);
-  sysOpt->Revision = uint16_t(strtoul(optionValues[OptAddr::Revision], NULL, 16));
-  sysOpt->SleepMaxTime= atoi(optionValues[OptAddr::SleepMaxTime]);
-  sysOpt->SleepNumCyclesToMeas= atoi(optionValues[OptAddr::SleepNumCyclesToMeas]);
-  sysOpt->SleepTimeCycleMs = atoi(optionValues[OptAddr::SleepTimeCycleMs]);
-  sysOpt->StandbyTout = atoi(optionValues[OptAddr::StandbyTout]);
-  sysOpt->SwitchTurnOffTime = atoi(optionValues[OptAddr::SwitchTurnOffTime]);
-  sysOpt->TimeZone = atoi(optionValues[OptAddr::TimeZone]);
-  sysOpt->Volt_Range = atoi(optionValues[OptAddr::Volt_Range]);
-  
-  if (atoi(optionValues[OptAddr::BattProtect]) == 0) 
-    sysOpt->BattProtect = false;
-  else sysOpt->BattProtect = true;
-  if (atoi(optionValues[OptAddr::Diode_MeasMode]) == 0) 
-    sysOpt->Diode_MeasMode = false;
-  else sysOpt->Diode_MeasMode = true;
-  if (atoi(optionValues[OptAddr::Diode_Buzz]) == 0) 
-    sysOpt->Diode_Buzz = false;
-  else sysOpt->Diode_Buzz = true;
-  if (atoi(optionValues[OptAddr::Ohm_Buzz]) == 0) 
-    sysOpt->Ohm_Buzz = false;
-  else sysOpt->Ohm_Buzz = true;
-  if (atoi(optionValues[OptAddr::Ohm_MeasMode]) == 0) 
-    sysOpt->Ohm_MeasMode = false;
-  else sysOpt->Ohm_MeasMode = true;
-  if (atoi(optionValues[OptAddr::Opt_FlipScreen]) == 0) 
-    sysOpt->Opt_FlipScreen = false;
-  else sysOpt->Opt_FlipScreen = true;
-  if (atoi(optionValues[OptAddr::SleepWithCharger]) == 0) 
-    sysOpt->SleepWithCharger = false;
-  else sysOpt->SleepWithCharger = true;
-  if (atoi(optionValues[OptAddr::TimeDaylightOffset]) == 0) 
-    sysOpt->TimeDaylightOffset = false;
-  else sysOpt->TimeDaylightOffset = true;
+    // Read header line and discard it
+    if (optionsFile.available()) {
+        optionsFile.readStringUntil('\n');
+    }
 
-  // Copy MAC_Address_Device
-  if (optionValues[OptAddr::MAC_Address_Device]) {
-      strncpy(sysOpt->MAC_Address_Device,
-      optionValues[OptAddr::MAC_Address_Device],
-      sizeof(sysOpt->MAC_Address_Device) - 1);
-      sysOpt->MAC_Address_Device[sizeof(sysOpt->MAC_Address_Device) - 1] = '\0'; // ensure null-termination
-  } 
-  else {
-      sysOpt->MAC_Address_Device[0] = '\0';
-  }
+    uint32_t storedChecksum = 0;
 
-  // Copy MAC_Address_Remote
-  if (optionValues[OptAddr::MAC_Address_Remote]) {
-      strncpy(sysOpt->MAC_Address_Remote,
-      optionValues[OptAddr::MAC_Address_Remote],
-      sizeof(sysOpt->MAC_Address_Remote) - 1);
-      sysOpt->MAC_Address_Remote[sizeof(sysOpt->MAC_Address_Remote) - 1] = '\0';
-  } 
-  else {
-      sysOpt->MAC_Address_Remote[0] = '\0';
-  }
+    while (optionsFile.available()) {
+        String line = optionsFile.readStringUntil('\n');
+        line.trim();
+        if (line.length() == 0) continue;
 
-  serialPrintDebug("MAC Address Device: (d)%s (s)%s\n", sysOpt->MAC_Address_Device, optionValues[OptAddr::MAC_Address_Device]);
-  serialPrintDebug("MAC Address Remote: (d)%s (s)%s\n", sysOpt->MAC_Address_Remote, optionValues[OptAddr::MAC_Address_Remote]);
+        // Manually parse the CSV line
+        int firstComma = line.indexOf(',');
+        int secondComma = line.indexOf(',', firstComma + 1);
+        int thirdComma = line.indexOf(',', secondComma + 1);
 
-  uint64_t storedChecksum = strtoull(optionValues[OptAddr::dataChecksum], NULL, 16);
-  serialPrintDebug("Stored checksum %lld\n", storedChecksum);
-  sysOpt->dataChecksum = calcOptionDataChecksum(sysOpt);
-  if(storedChecksum == 10081961){
-    serialPrintDebug("Valid checksum (Init) 0x%lld\n", storedChecksum);
-    return;
-  }
-  if(storedChecksum == sysOpt->dataChecksum){
-    serialPrintDebug("Valid checksum (Calc) 0x%lld\n", sysOpt->dataChecksum);
-    return;
-  }
-  *sysOpt = PredefinedOptions;
-  serialPrintDebug("Data Options corrupted (C) %X (S) %X. Loading Predefined Options\n", sysOpt->dataChecksum, storedChecksum);
-  // Data Options corrupted, add gui message to display.
-  return;
+        if (firstComma == -1 || secondComma == -1) continue; // Need at least name and value
+
+        String key = line.substring(0, firstComma);
+        String valueStr = line.substring(secondComma + 1, thirdComma);
+        String commentStr = (thirdComma != -1) ? line.substring(thirdComma + 1) : "";
+
+        // Store the original comment for this key in PSRAM
+        optionComments[key.c_str()] = commentStr.c_str();
+
+        // Special case for the checksum
+        if (key == "dataChecksum") {
+            storedChecksum = strtoul(valueStr.c_str(), NULL, 16);
+            continue;
+        }
+
+        bool keyFound = false;
+        // Find the matching descriptor for the key
+        for (size_t i = 0; i < numOptionDescriptors; ++i) {
+            const OptionDescriptor& desc = optionDescriptors[i];
+            if (key == desc.name) {
+                // Pointer to the actual member in the options struct
+                void* memberPtr = (uint8_t*)&options + desc.offset;
+
+                // Set the value based on its type from the descriptor
+                switch (desc.type) {
+                    case TYPE_FLOAT:
+                        *(static_cast<float*>(memberPtr)) = valueStr.toFloat();
+                        break;
+                    case TYPE_BOOL:
+                        *(static_cast<bool*>(memberPtr)) = (valueStr == "true" || valueStr == "1");
+                        break;
+                    case TYPE_UINT16:
+                        *(static_cast<uint16_t*>(memberPtr)) = (uint16_t)valueStr.toInt();
+                        break;
+                    case TYPE_INT16:
+                        *(static_cast<int16_t*>(memberPtr)) = (int16_t)valueStr.toInt();
+                        break;
+                    case TYPE_STRING:
+                        strncpy(static_cast<char*>(memberPtr), valueStr.c_str(), desc.size - 1);
+                        (static_cast<char*>(memberPtr))[desc.size - 1] = '\0'; // Ensure null termination
+                        break;
+                }
+                keyFound = true;
+                break; // Found and processed, move to the next row
+            }
+        }
+
+        if (!keyFound) {
+            serialPrintDebug("WARNING: Unknown option in %s: %s\n", fileName, key.c_str());
+        }
+    }
+
+    optionsFile.close();
+
+    // Now, validate the checksum
+    uint32_t calculatedChecksum = calcOptionDataChecksum(options);
+    if (calculatedChecksum == storedChecksum) {
+        serialPrintDebug("Options loaded successfully from %s. Checksum OK (0x%X)\n", fileName, calculatedChecksum);
+        options.dataChecksum = calculatedChecksum; // Store the valid checksum
+        return true;
+    } else {
+        serialPrintDebug("ERROR: Checksum mismatch in %s. Stored: 0x%X, Calculated: 0x%X. Loading predefined defaults.\n", fileName, storedChecksum, calculatedChecksum);
+        options = PredefinedOptions; // Load defaults
+        options.dataChecksum = calcOptionDataChecksum(options); // Recalculate checksum for defaults
+        return false; // Indicate that defaults were loaded
+    }
 }
 
 /**
- * Writes the values from a sysOptions structure to a CSV file.
- *
- * This function converts the values from the sysOptions structure into string format
- * and updates the CSV_Parser object with these values. It handles conversion of 
- * float, integer, and boolean types to their string representations. The updated 
- * CSV data is then saved to a file specified by the optionsPath.
- *
- * @param dataOptions A string containing the CSV data to be parsed.
- * @param sysOpt A pointer to the sysOptions structure containing the options to write.
+ * @brief Writes the options struct to a CSV file, preserving original comments
+ *        in a memory-efficient way.
+ * @param fileName The full path to the options file.
+ * @param options The sysOptions struct containing the data to save.
+ * @return True on success, false on failure.
  */
+bool WriteOptionsToFile(const char *fileName, const sysOptions &options) {
+    // This function no longer needs to read the original file, as comments are stored in the PSRAM map.
+    File optionsFile = LittleFS.open(fileName, "w");
+    if (!optionsFile) {
+        serialPrintDebug("ERROR: Failed to open file for writing: %s\n", fileName);
+        return false;
+    }
 
-void WriteOptionsToFile(String dataOptions, sysOptions* sysOpt){
-  //dataOptions.replace('\t', ',');  
- 
-  CSV_Parser cp(dataOptions.c_str(), "ssss");
-  size_t rows = cp.getRowsCount();
-  if (rows == 0) {
-    serialPrintDebug("No rows found in CSV data.\n");
-    return;
-  }
+    // Write header
+    optionsFile.println("Option_name,Type,Option_value,comment");
 
-  serialPrintDebug("Number of lines: %d\n", cp.getRowsCount());
-  char **optionNames = (char**)cp["Option_name"];
-  char **optionType = (char**)cp["Type"];
-  char **optionValues = (char**)cp["Option_value"];
-  char **comments = (char**)cp["comment"];
-  // Parse the CSV data
-  //for(int row = 0; row < 37; row++)
-  for(int row = 0; row < cp.getRowsCount(); row++)
-    serialPrintDebug("%s, %s, %s\n", optionNames[row], optionValues[row], comments[row]);
-  
-  // Prepare modifiable copy for option values
-  std::vector<String> values(rows);
-  for (size_t i = 0; i < rows; i++) {
-    values[i] = optionValues[i] ? optionValues[i] : "";
-  }
+    for (size_t i = 0; i < numOptionDescriptors; ++i) {
+        const OptionDescriptor& desc = optionDescriptors[i];
+        const void* memberPtr = (const uint8_t*)&options + desc.offset;
 
-  // ---- Update values safely ----
-  char buf[32]; // temp buffer for dtostrf
+        optionsFile.print(desc.name);
+        optionsFile.print(",");
 
-    // Float options to string conversion 
-  dtostrf(sysOpt->ADC_VbattCorr, 6, 5, buf); values[OptAddr::ADC_VbattCorr] = buf;
-  dtostrf(sysOpt->ADC_VmeasR1NegGain, 6, 5, buf); values[OptAddr::ADC_VmeasR1NegGain] = buf; 
-  dtostrf(sysOpt->ADC_VmeasR1NegOffset, 6, 5, buf); values[OptAddr::ADC_VmeasR1NegOffset] = buf; 
-  dtostrf(sysOpt->ADC_VmeasR2NegGain, 6, 5, buf); values[OptAddr::ADC_VmeasR2NegGain] = buf;
-  dtostrf(sysOpt->ADC_VmeasR2NegOffset, 6, 5, buf); values[OptAddr::ADC_VmeasR2NegOffset] = buf;
-  dtostrf(sysOpt->ADC_VmeasR1Offset, 6, 5,  buf); values[OptAddr::ADC_VmeasR1Offset] = buf;
-  dtostrf(sysOpt->ADC_VmeasR1PosGain, 6, 5, buf); values[OptAddr::ADC_VmeasR1PosGain] = buf;
-  dtostrf(sysOpt->ADC_VmeasR1PosOffset, 6, 5, buf); values[OptAddr::ADC_VmeasR1PosOffset] = buf;
-  dtostrf(sysOpt->ADC_VmeasR2Offset, 6, 5, buf); values[OptAddr::ADC_VmeasR2Offset] = buf;
-  dtostrf(sysOpt->ADC_VmeasR2PosGain, 6, 5, buf); values[OptAddr::ADC_VmeasR2PosGain] = buf;
-  dtostrf(sysOpt->ADC_VmeasR2PosOffset, 6, 5, buf); values[OptAddr::ADC_VmeasR2PosOffset] = buf;
-  dtostrf(sysOpt->ADC_VrefGain, 6, 5, buf); values[OptAddr::ADC_VrefGain] = buf;
-  dtostrf(sysOpt->ADC_VrefOffset, 6, 5, buf); values[OptAddr::ADC_VrefOffset] = buf;
-  dtostrf(sysOpt->ADC_x2_GainCorr, 6, 5, buf); values[OptAddr::ADC_x2_GainCorr] = buf;
-  dtostrf(sysOpt->ADC_x4_GainCorr, 6, 5, buf); values[OptAddr::ADC_x4_GainCorr] = buf;
-  dtostrf(sysOpt->ADC_x8_GainCorr, 6, 5, buf); values[OptAddr::ADC_x8_GainCorr] = buf;
-  dtostrf(sysOpt->ADC_x16_GainCorr, 6, 5, buf); values[OptAddr::ADC_x16_GainCorr] = buf;
-  dtostrf(sysOpt->ADC_x32_GainCorr, 6, 5, buf); values[OptAddr::ADC_x32_GainCorr] = buf;
-  dtostrf(sysOpt->ADC_x64_GainCorr, 6, 5, buf); values[OptAddr::ADC_x64_GainCorr] = buf;
-  dtostrf(sysOpt->ADC_x128_GainCorr, 6, 5, buf); values[OptAddr::ADC_x128_GainCorr] = buf;
-  dtostrf(sysOpt->BattLowThreshold, 6, 5, buf); values[OptAddr::BattLowThreshold] = buf;
-  dtostrf(sysOpt->BattOkThreshold, 6, 5, buf); values[OptAddr::BattOkThreshold] = buf;
-  dtostrf(sysOpt->DAC_V_Iref_Gain, 6, 5, buf); values[OptAddr::DAC_V_Iref_Gain] = buf;
-  dtostrf(sysOpt->DAC_V_Iref_Offset, 6, 5, buf); values[OptAddr::DAC_V_Iref_Offset] = buf;
-  dtostrf(sysOpt->DAC_V_Iset_Gain, 6, 5, buf); values[OptAddr::DAC_V_Iset_Gain] = buf;
-  dtostrf(sysOpt->DAC_V_Iset_Offset, 6, 5, buf); values[OptAddr::DAC_V_Iset_Offset] = buf;
-  dtostrf(sysOpt->DAC_Voffs_Gain, 6, 5, buf); values[OptAddr::DAC_Voffs_Gain] = buf;
-  dtostrf(sysOpt->DAC_Voffs_Gain, 6, 5, buf); values[OptAddr::DAC_Voffs_Gain] = buf;
-  dtostrf(sysOpt->DAC_Voffs_Offset, 6, 5, buf); values[OptAddr::DAC_Voffs_Offset] = buf;
-  dtostrf(sysOpt->DAC_Vsetn_Gain, 6, 5, buf); values[OptAddr::DAC_Vsetn_Gain] = buf;
-  dtostrf(sysOpt->DAC_Vsetn_Offset, 6, 5, buf); values[OptAddr::DAC_Vsetn_Offset] = buf;
-  dtostrf(sysOpt->DAC_Vsetp_Gain, 6, 5, buf); values[OptAddr::DAC_Vsetp_Gain] = buf;
-  dtostrf(sysOpt->DAC_Vsetp_Offset, 6, 5, buf); values[OptAddr::DAC_Vsetp_Offset] = buf;
-  dtostrf(sysOpt->Diode_I_LED, 6, 2, buf); values[OptAddr::Diode_I_LED] = buf;
-  dtostrf(sysOpt->Diode_I_LowVF, 6, 2, buf); values[OptAddr::Diode_I_LowVF] = buf;
-  dtostrf(sysOpt->Diode_I_Zener, 6, 2, buf); values[OptAddr::Diode_I_Zener] = buf;
-  dtostrf(sysOpt->Diode_V_LED, 6, 2, buf); values[OptAddr::Diode_V_LED] = buf;
-  dtostrf(sysOpt->Diode_V_LowVF, 6, 2, buf); values[OptAddr::Diode_V_LowVF] = buf;
-  dtostrf(sysOpt->Diode_V_Zener, 6, 2, buf); values[OptAddr::Diode_V_Zener] = buf;
-  dtostrf(sysOpt->Ohm_I_1R, 6, 2, buf); values[OptAddr::Ohm_I_1R] = buf;
-  dtostrf(sysOpt->Ohm_I_1kR, 6, 2, buf); values[OptAddr::Ohm_I_1kR] = buf;
-  dtostrf(sysOpt->Ohm_I_10kR, 6, 2, buf); values[OptAddr::Ohm_I_10kR] = buf;
-  dtostrf(sysOpt->Ohm_I_100kR, 6, 2, buf); values[OptAddr::Ohm_I_100kR] = buf;
-  dtostrf(sysOpt->Ohm_I_1MR, 6, 2, buf); values[OptAddr::Ohm_V_1MR] = buf;
-  dtostrf(sysOpt->Ohm_I_10MR, 6, 2, buf); values[OptAddr::Ohm_I_10MR] = buf;
-  dtostrf(sysOpt->Ohm_V_1R, 6, 2, buf); values[OptAddr::Ohm_V_1R] = buf;
-  dtostrf(sysOpt->Ohm_V_1kR, 6, 2, buf); values[OptAddr::Ohm_V_1kR] = buf;
-  dtostrf(sysOpt->Ohm_V_10kR, 6, 2, buf); values[OptAddr::Ohm_V_10kR] = buf;
-  dtostrf(sysOpt->Ohm_V_100kR, 6, 2, buf); values[OptAddr::Ohm_V_100kR] = buf;
-  dtostrf(sysOpt->Ohm_V_1MR, 6, 2, buf); values[OptAddr::Ohm_V_1MR] = buf;
-  dtostrf(sysOpt->Ohm_V_10MR, 6, 2, buf); values[OptAddr::Ohm_V_10MR] = buf;
-  dtostrf(sysOpt->SMU_I_Lim, 6, 2, buf); values[OptAddr::SMU_I_Lim] = buf;
-  dtostrf(sysOpt->SMU_V_Lim, 6, 2, buf); values[OptAddr::SMU_V_Lim] = buf;
-  // Integer options to string conversion
-  values[OptAddr::ADC_Averages] = String(int(sysOpt->ADC_Averages));
-  values[OptAddr::ADC_Sample_Rate] = String(sysOpt->ADC_Sample_Rate);
-  values[OptAddr::ADC_VdiffGain] = String(sysOpt->ADC_VdiffGain);
-  values[OptAddr::ADC_VnPGain] = String(sysOpt->ADC_VnPGain);
-  values[OptAddr::LastScreen] = String(sysOpt->LastScreen);
-  values[OptAddr::BacklightBrightness] = String(sysOpt->BacklightBrightness);
-  values[OptAddr::BacklightLowBrght] = String(sysOpt->BacklightLowBrght);
-  values[OptAddr::BacklightTout] = String(sysOpt->BacklightTout);
-  values[OptAddr::BattMinChargeLeft] = String(sysOpt->BattMinChargeLeft);
-  values[OptAddr::DiodeType] = String(sysOpt->DiodeType);
-  values[OptAddr::LastScreen] = String(sysOpt->LastScreen);
-  values[OptAddr::Ohm_Range] = String(sysOpt->Ohm_Range);
-  values[OptAddr::Revision] = "0x" + String(sysOpt->Revision, HEX);
+        char typeChar = '?';
+        switch (desc.type) {
+            case TYPE_FLOAT:  typeChar = 'f'; break;
+            case TYPE_BOOL:   typeChar = 'b'; break;
+            case TYPE_UINT16: typeChar = 'u'; break;
+            case TYPE_INT16:  typeChar = 'i'; break;
+            case TYPE_STRING: typeChar = 's'; break;
+        }
+        optionsFile.print(typeChar);
+        optionsFile.print(",");
 
-  values[OptAddr::SleepMaxTime] = String(sysOpt->SleepMaxTime);
-  values[OptAddr::SleepNumCyclesToMeas] = String(sysOpt->SleepNumCyclesToMeas);
-  values[OptAddr::SleepTimeCycleMs] = String(sysOpt->SleepTimeCycleMs);
-  values[OptAddr::StandbyTout] = String(sysOpt->StandbyTout);
-  values[OptAddr::SwitchTurnOffTime] = String(sysOpt->SwitchTurnOffTime);
-  values[OptAddr::TimeZone] = String(sysOpt->TimeZone);
-  values[OptAddr::Volt_Range] = String(sysOpt->Volt_Range);
+        switch (desc.type) {
+            case TYPE_FLOAT:
+                optionsFile.print(*(static_cast<const float*>(memberPtr)), 6);
+                break;
+            case TYPE_BOOL:
+                optionsFile.print(*(static_cast<const bool*>(memberPtr)) ? "1" : "0");
+                break;
+            case TYPE_UINT16:
+                optionsFile.print(*(static_cast<const uint16_t*>(memberPtr)));
+                break;
+            case TYPE_INT16:
+                optionsFile.print(*(static_cast<const int16_t*>(memberPtr)));
+                break;
+            case TYPE_STRING:
+                optionsFile.print(static_cast<const char*>(memberPtr));
+                break;
+        }
 
-  // Binary options to string conversion
-  values[OptAddr::BattProtect] = String(int(sysOpt->BattProtect), BIN); 
-  values[OptAddr::Diode_MeasMode] = String(int(sysOpt->Diode_MeasMode), BIN); 
-  values[OptAddr::Diode_Buzz] = String(int(sysOpt->Diode_Buzz), BIN);
-  values[OptAddr::Ohm_Buzz] = String(int(sysOpt->Ohm_Buzz), BIN);
-  values[OptAddr::Ohm_MeasMode] = String(int(sysOpt->Ohm_MeasMode), BIN);
-  values[OptAddr::Opt_FlipScreen] = String(int(sysOpt->Opt_FlipScreen), BIN);
-  values[OptAddr::SleepWithCharger] = String(int(sysOpt->SleepWithCharger), BIN);
-  values[OptAddr::TimeDaylightOffset] = String(int(sysOpt->TimeDaylightOffset), BIN);
-  
-  values[OptAddr::MAC_Address_Device] = String(sysOpt->MAC_Address_Device);
-  values[OptAddr::MAC_Address_Remote] = String(sysOpt->MAC_Address_Remote);
-  
-  sysOpt->dataChecksum = calcOptionDataChecksum(sysOpt);
-  values[OptAddr::dataChecksum] = "0x" + String(sysOpt->dataChecksum, HEX);
+        // Write the original comment back from our PSRAM-backed map
+        optionsFile.print(",");
+        auto it = optionComments.find(psram_string(desc.name));
+        if (it != optionComments.end()) {
+            optionsFile.println(it->second.c_str());
+        } else {
+            optionsFile.println("-"); // Default placeholder comment if none was found
+        }
+    }
 
-  // ---- Save updated CSV ----
-  File file = LittleFS.open(optionsPath, FILE_WRITE);
-  if (!file) {
-    serialPrintDebug("Failed to open file for writing\n");
-    return;
-  }
-  // Write header
-  file.println("Option_name,Type,Option_value,comment");
+    uint32_t optionsChecksum = calcOptionDataChecksum(options); // Recalculate checksum for defaults
+    optionsFile.print("dataChecksum,u,0x");
+    optionsFile.print(optionsChecksum, HEX);
+    optionsFile.println(",-"); // Add comma before the placeholder comment
 
-  // Write rows
-  for (size_t i = 0; i < rows; i++) {
-    if (optionNames[i])  
-      file.print(optionNames[i]);
-    file.print(",");
-
-    if (optionType[i])   
-      file.print(optionType[i]);
-    file.print(",");
-
-    file.print(values[i]);   // safe modified value
-    file.print(",");
-
-    if (comments[i])     
-      file.println(comments[i]);
-    else                 
-      file.println();
-  }
-
-  file.close();
-  serialPrintDebug("CSV updated and saved successfully.");
+    optionsFile.close();
+    serialPrintDebug("Options saved to %s\n", fileName);
+    return true;
 }
 
 
 /**
- * @brief Extracts option values from the provided CSV data.
- * 
- * This function parses CSV data using the CSV_Parser object to extract
- * various fields such as option names, types, values, and comments. 
- * The number of lines in the CSV data is logged, and for each row,
- * the option name, value, and comment are printed. Finally, it returns
- * the array of option values.
- * 
- * @param dataOptions A string containing the CSV data to be parsed.
- * @param cp A CSV_Parser object initialized with the dataOptions.
- * 
- * @return A pointer to an array of strings containing the option values.
+ * @brief Calculates a robust CRC32 checksum of the options struct.
+ * @note This version iterates through the descriptor table, ensuring that only
+ *       actual data members are included in the checksum, ignoring any
+ *       compiler-inserted padding bytes. This makes the checksum stable
+ *       across different builds and compiler versions.
+ * @param options The sysOptions structure to be checksummed.
+ * @return A 32-bit CRC checksum.
  */
+uint32_t calcOptionDataChecksum(const sysOptions &options) {
+    uint32_t crc = 0; // Initial CRC value
 
-char **getCSV_Values(String dataOptions, CSV_Parser cp){
-  serialPrintDebug("Number of lines: %d\n", cp.getRowsCount());
-  char **optionNames = (char**)cp["Option_name"];
-  char **optionType = (char**)cp["Type"];
-  char **optionValues = (char**)cp["Option_value"];
-  char **comments = (char**)cp["comment"];
-  // Parse the CSV data
-  //for(int row = 0; row < 37; row++)
-  for(int row = 0; row < cp.getRowsCount(); row++)
-    serialPrintDebug("%s, %s, %s\n", optionNames[row], optionValues[row], comments[row]);
-  return optionValues;
+    for (size_t i = 0; i < numOptionDescriptors; ++i) {
+        const OptionDescriptor& desc = optionDescriptors[i];
+        const uint8_t* memberPtr = (const uint8_t*)&options + desc.offset;
+        size_t memberSize = 0;
+
+        switch (desc.type) {
+            case TYPE_FLOAT:  memberSize = sizeof(float); break;
+            case TYPE_BOOL:   memberSize = sizeof(bool); break;
+            case TYPE_UINT16: memberSize = sizeof(uint16_t); break;
+            case TYPE_INT16:  memberSize = sizeof(int16_t); break;
+            case TYPE_STRING: memberSize = strnlen((const char*)memberPtr, desc.size); break;
+        }
+
+        if (memberSize > 0) {
+            crc = esp_rom_crc32_le(crc, memberPtr, memberSize);
+        }
+    }
+    return crc;
 }
 
-uint64_t calcOptionDataChecksum(sysOptions* sysOpt) {
-  uint64_t sum = 0;
-  unsigned char *p = (unsigned char *) sysOpt;
-  uint16_t numBytesInOptions = sizeof(*sysOpt) - sizeof(sysOpt->dataChecksum);
-  for (int i=0; i<numBytesInOptions; i++){
-    sum += p[i];
-    serialPrintDebug("Data Checksum: %lld Data: %d Byte # %d  \n", sum, p[i], i);
-  }  
-  return sum;
-}
 
 /**
  * @brief Convert a MAC address from a string to an array of bytes.

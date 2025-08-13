@@ -3,10 +3,10 @@ ADC_Averages,u,3,Averages can be 0 = 1; 1 = 2; 2=4; 3 =8; 4 = 16; 5 = 32; 6 = 64
 ADC_Sample_Rate,u,2,Options are 0 = 20; 1 = 45; 2 = 90; 3 = 175; 4 = 300; 5 = 600; 7 = 1000; 8 = 2000 SPS
 ADC_VbattCorr,f,1,Linear correction m parameter for Vbatt
 ADC_VdiffGain,u,0,ADC Gain in Volt mode for Vdiff measurement. 0 = x1; 1 = x2 - 7 = x128 
-ADC_VmeasNegR1Gain,f,0.99872,Negative linear correction m parameter for -Vmeas (24V Range)
-ADC_VmeasNegR1Offset,f,-0.00111,Negative linear correction b parameter fopr -Vmeas (24V Range)
-ADC_VmeasNegR2Gain,f,0.99872,Negative linear correction m parameter for -Vmeas(240V Range)
-ADC_VmeasNegR2Offset,f,-0.00111,Negative linear correction b parameter fopr -Vmeas (240V Range)
+ADC_VmeasR1NegGain,f,0.99872,Negative linear correction m parameter for -Vmeas (24V Range)
+ADC_VmeasR1NegOffset,f,-0.00111,Negative linear correction b parameter fopr -Vmeas (24V Range)
+ADC_VmeasR2NegGain,f,0.99872,Negative linear correction m parameter for -Vmeas(240V Range)
+ADC_VmeasR2NegOffset,f,-0.00111,Negative linear correction b parameter fopr -Vmeas (240V Range)
 ADC_VmeasR1Offset,f,-0.0111,Voltage offset near zero (24V Range)
 ADC_VmeasR1PosGain,f,0.99956,Positive linear correction m parameter for +Vmeas (24V Range)
 ADC_VmeasR1PosOffset,f,-0.021,Positive linear correction b parameter for +Vmeas (24V Range)

@@ -5,6 +5,7 @@
 #include "ui.h"
 #include "DiffAmp.h"
 #include "PCA9554.h"
+#include "SysOptions.h"
 extern sysOptions sysOpt;
 extern vi_limits ohm_vi_Limits;
 extern vi_limits diode_vi_Limits;

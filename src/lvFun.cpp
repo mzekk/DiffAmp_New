@@ -2,6 +2,7 @@
 #include "EncoderRead.h"
 #include "DiffAmp.h"
 #include "pin_config.h"
+#include "SysOptions.h"
 
 #define VDIFF_TAB   0
 #define OHM_TAB     1

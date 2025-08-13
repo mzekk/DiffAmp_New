@@ -39,7 +39,7 @@ void BatteryManager::enterSleepState(bool init) {
     currentState = State::SLEEPING;
     //overchargeTestTime = millis();
     sleepCycleCounter = 0;
-    maxSleepCycles = (sysOpt->SleepMaxTime * MS_IN_ONE_HOUR) / sysOpt->SleepTimeCycleMs;
+    maxSleepCycles = (sysOpt->SleepMaxTime * MS_IN_ONE_HOUR) / sysOpt->SleepTimeCycleMs; // Check if necessary
 }
 
 void BatteryManager::enterActiveState(bool init) {

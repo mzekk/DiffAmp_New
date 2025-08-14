@@ -1,4 +1,4 @@
-#include "..\src\ui\ui.h"
+#include "ui/ui.h"
 #include "EncoderRead.h"
 #include "DiffAmp.h"
 #include "pin_config.h"

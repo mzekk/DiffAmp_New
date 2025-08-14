@@ -1,0 +1,7 @@
+{
+  "name": "optionsManager",
+  "version": "1.0.0",
+  "description": "Manages system options defined in OptionsModel.",
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}

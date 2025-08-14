@@ -10,9 +10,9 @@
 #include <string>
 #include "stdarg.h"
 #include "esp_rom_crc.h" // For crc32_le
-#include "../lib/PSRAM_Allocator/PSRAM_Allocator.h"
+#include <PSRAM_Allocator.h> // Use angle brackets for libraries
 #include "SysOptions.h"
-#include "../lib/optionsManager/OptionsModel.h"
+#include <OptionsModel.h>    // Use angle brackets for libraries
 //#include "EspNowManager.h"
 
 sysOptions PredefinedOptions = {

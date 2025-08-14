@@ -1,0 +1,7 @@
+{
+  "name": "PSRAM_Allocator",
+  "version": "1.0.0",
+  "description": "A C++ STL allocator that uses PSRAM.",
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}

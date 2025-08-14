@@ -37,21 +37,25 @@ void BatteryManager::enterSleepState(bool init) {
     chargeHysteresis = 0.0f;
     chargeCycleIsDisabled = false;
     currentState = State::SLEEPING;
-    //overchargeTestTime = millis();
+    overchargeTestTime = millis();
     sleepCycleCounter = 0;
     maxSleepCycles = (sysOpt->SleepMaxTime * MS_IN_ONE_HOUR) / sysOpt->SleepTimeCycleMs; 
+    chargerTestInProgress = false;
+    ioExp.portMode(ENABLE_CHARGER);
+
 }
 
 void BatteryManager::enterActiveState(bool init) {
     if(init){
          resetChargeLogic();       
     }
-
     currentState = State::ACTIVE;    
-    //overchargeTestTime = millis();
+    overchargeTestTime = millis();
     sleepCycleCounter = 0;
     chargeCycleIsDisabled = false;
     chargeHysteresis = 0.0f;
+    chargerTestInProgress = false;
+    ioExp.portMode(ENABLE_CHARGER);
 }
 
 void BatteryManager::resetChargeLogic() {

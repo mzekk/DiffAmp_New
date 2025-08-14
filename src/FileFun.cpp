@@ -184,8 +184,11 @@ void initLittleFS() {
   if (!LittleFS.begin()) {
     log_e("LittleFS mount failed, formatting...");
     if (!LittleFS.begin(true)) {
-        Serial.println("LittleFS format failed!");
-        while (true); // stop here
+        // Instead of freezing, show a fatal error on the screen.
+        // You would need to implement a function that displays a message
+        // and halts, perhaps after a button press.
+        // show_fatal_error_screen("CRITICAL: FS Mount Failed!");
+        while (true); // Halt execution after showing the error
     }
 }
 log_e("LittleFS mounted successfully.");

@@ -1,9 +1,11 @@
 #pragma once
 
 #include "SysOptions.h"
-#define CHARGER_TEST_TIME_START 9000    // Time in ms to start the charger presence test
-#define CHARGER_TEST_TIME_START_SLEEP 8800    // Time in ms to start the charger presence test
-#define CHARGER_TEST_TIME_END   9300    // Time in ms to sample the charger presence
+#define CHARGER_TEST_TIME_START 9000        // Time in ms to start the charger presence test
+#define CHARGER_TEST_TIME_START_SLEEP 8800  // Time in ms to start the charger presence test
+#define CHARGER_TEST_TIME_END   9300        // Time in ms to sample the charger presence
+#define MASK_15SEC              15000       // Time in ms to skip battery monitoring while in Active mode
+#define MASK_OFF                0           // Battery is always monitored
 
 
 class BatteryManager {
@@ -26,13 +28,14 @@ public:
     /**
      * @brief The main update loop for the battery manager. Call this regularly.
      */
-    void update();
+    void update(uint32_t currentTime);
 
     /**
      * @brief Puts the battery manager into the SLEEPING state.
      */
     void enterSleepState(bool init);
     void enterActiveState(bool init);
+    void setState(State newState);
 
 
     // --- Public Getters for Status ---
@@ -45,7 +48,7 @@ public:
 private:
     // --- Private Methods for Internal Logic ---
     void readHardwareState();
-    void updateActiveMode();
+    void updateActiveMode(uint32_t currentTime);
     void updateSleepMode();
     void resetChargeLogic();
     bool checkChargerPresence(float maxCharge);

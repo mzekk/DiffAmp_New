@@ -27,6 +27,8 @@
 #include "esp_wifi.h"
 #include "SysOptions.h"
 #include "BatteryManager.h"
+#include "TuneManager.h"
+#include "tunes.h"
 
 
 #define TEST_ENCODER 1
@@ -138,6 +140,8 @@ void setup()
   //inProgressWiFi = initWiFi();    
   WiFi_Service();
   //setup_TMR_intrpt(INTR_TIME);
+  
+
   ticker4ms.attach_ms(4, tickHandler);
   //sleepModeTest();
 
@@ -171,7 +175,11 @@ void setup()
   currentScreen = sysOpt.LastScreen;
   lv_tabview_set_act(ui_MainPageTabs, currentScreen, LV_ANIM_OFF); // Show Tab 1 on startup  
   switchOffRequest = false;
+  start_tune_player();
+  // Play a festive tune on startup!
+  play_tune(jingle_bells_tune);
   serialPrintDebug("Before Main Loop: Heap: %d   Min: %d\n", ESP.getFreeHeap(), ESP.getMinFreeHeap());
+  //enableHV_Regs(VAMP_MIN);     // Turn on High Voltage Circuits
 }
 
 int16_t Counter = 0, updDacsCnt = 0;

@@ -30,46 +30,51 @@ BatteryManager::BatteryManager(sysOptions* options)
     readHardwareState();
 }
 
+void BatteryManager::setState(State newState) {
+    // Only perform actions if the state is actually changing to prevent redundant logic.
+    if (currentState != newState) {
+        serialPrintDebug("[BATT] State changing from %d to %d\n", static_cast<int>(currentState), static_cast<int>(newState));
+        currentState = newState;
+
+        // Centralized logic that runs *after* a state transition.
+        // This is much cleaner than scattering this logic in multiple places.
+        if (currentState == State::ACTIVE) {
+            sleepCycleCounter = 0; // Reset sleep counter whenever we become active.
+        }
+    }
+}
+
 void BatteryManager::enterSleepState(bool init) {
     if(init){
         resetChargeLogic();
     }
+    // Use the setter to ensure all state change logic is handled consistently.
+    setState(State::SLEEPING);
+}
+
+void BatteryManager::enterActiveState(bool init) {
+    if(init){
+         resetChargeLogic();
+    }
+    // Use the setter to ensure all state change logic is handled consistently.
+    setState(State::ACTIVE);
+}
+
+void BatteryManager::resetChargeLogic() {
     chargeHysteresis = 0.0f;
-    chargeCycleIsDisabled = false;
-    currentState = State::SLEEPING;
+    chargeCycleIsDisabled = false; 
     overchargeTestTime = millis();
     sleepCycleCounter = 0;
     maxSleepCycles = (sysOpt->SleepMaxTime * MS_IN_ONE_HOUR) / sysOpt->SleepTimeCycleMs; 
     chargerTestInProgress = false;
     ioExp.portMode(ENABLE_CHARGER);
-
 }
 
-void BatteryManager::enterActiveState(bool init) {
-    if(init){
-         resetChargeLogic();       
-    }
-    currentState = State::ACTIVE;    
-    overchargeTestTime = millis();
-    sleepCycleCounter = 0;
-    chargeCycleIsDisabled = false;
-    chargeHysteresis = 0.0f;
-    chargerTestInProgress = false;
-    ioExp.portMode(ENABLE_CHARGER);
-}
-
-void BatteryManager::resetChargeLogic() {
-    chargeHysteresis = 0.0f;
-    chargeCycleIsDisabled = false;
-    chargerTestInProgress = false;
-    overchargeTestTime = millis();
-}
-
-void BatteryManager::update() {
+void BatteryManager::update(uint32_t currentTime) {
     readHardwareState();
 
     if (currentState == State::ACTIVE) {
-        updateActiveMode();
+        updateActiveMode(currentTime);
     } else if (currentState == State::SLEEPING) {
         updateSleepMode();
     }
@@ -82,7 +87,8 @@ void BatteryManager::readHardwareState() {
     chargerIsConnected = (digitalRead(LDAC_CHRG) == LOW);
 }
 
-void BatteryManager::updateActiveMode() {
+void BatteryManager::updateActiveMode(uint32_t currentTime) {
+    static uint32_t battStateMaskTime = MASK_OFF, lastBattMaskTime = currentTime;
     float maxCharge = sysOpt->BattProtect ? SAFE_BATT_CHARGE : MAX_BATT_CHARGE;
     //serialPrintDebug("Active Mode - [BATT] SoC: %.1f%%, SoV: %.2fV\n", soc, sov);
 
@@ -100,10 +106,16 @@ void BatteryManager::updateActiveMode() {
 
     // --- Low Battery Shutdown Check ---
     // Only shut down if the charger is NOT connected.
-        if (!chargerIsConnected && (soc < sysOpt->BattMinChargeLeft || sov < sysOpt->BattLowThreshold)) {
-            serialPrintDebug("[BATT] Battery too low! SoC: %.1f%%, SoV: %.2fV. Shutting down.\n", soc, sov);
-            currentState = State::BATTERY_TOO_LOW;
+        if (!chargerIsConnected && (soc < sysOpt->BattMinChargeLeft || sov < sysOpt->BattLowThreshold)) {            
+            if(currentTime - lastBattMaskTime > battStateMaskTime){
+                serialPrintDebug("[BATT] Battery too low! SoC: %.1f%%, SoV: %.2fV. Requesting to Shut down power.\n", soc, sov);
+                setState(State::BATTERY_TOO_LOW);
+                battStateMaskTime = MASK_15SEC;    
+                lastBattMaskTime = currentTime;
+            }
+            else setState(State::ACTIVE);
         }
+        else battStateMaskTime = MASK_OFF;           
     }
     updateChargerIcon();
 }
@@ -112,7 +124,7 @@ void BatteryManager::updateSleepMode() {
     float maxCharge = sysOpt->BattProtect ? SAFE_BATT_CHARGE : MAX_BATT_CHARGE;
     // --- Sleep Timeout Check ---
     if (maxSleepCycles > 0 && --maxSleepCycles == 0) {
-        currentState = State::SLEEP_TIME_EXPIRED;
+        setState(State::SLEEP_TIME_EXPIRED);
         return;
     }
     // --- Overcharge Protection Logic ---
@@ -143,7 +155,7 @@ void BatteryManager::updateSleepMode() {
         ioExp.SetLeds((chargeCycleIsDisabled) ? DISP_PROBE_POLARITY_POS : DISP_PROBE_POLARITY_NEG);
         sleepCycleCounter = 0;
         if (soc < sysOpt->BattMinChargeLeft || sov < sysOpt->BattLowThreshold) {
-            currentState = State::BATTERY_TOO_LOW;
+            setState(State::BATTERY_TOO_LOW);
         }
         ioExp.SetLeds(ALL_LEDS_OFF);
         if(chargeCycleIsDisabled){            

@@ -533,6 +533,8 @@ bool wait_and_show_standby_screen(uint32_t timeout_sec, uint8_t mode) {
         char buf[80];
         if(mode == SLEEP_MSG_ID)
           sprintf(buf,"Standby in %d sec. \n\n Press Encoder to cancel", i);
+        if(mode == LOWBATT_MSG_ID)  
+          sprintf(buf,"[LOW BATTERY] - Turning Off in %d sec. \n\n Press Encoder to cancel", i);
         else
           sprintf(buf,"Turning Off in %d sec. \n\n Press Encoder to cancel", i);
         lv_textarea_set_text(ui_MessagesScr, buf);

@@ -102,6 +102,21 @@ bool get_int_signal = false;
 #endif
 #endif
 
+#ifdef USE_PSRAM_DISP_BUFFER
+/**
+ * @brief Swaps the bytes of a color buffer in-place.
+ * LVGL renders colors in Little Endian, but the ST7789 may require Big Endian.
+ * This function is needed when the hardware driver cannot swap the bytes automatically.
+ * @param buf Pointer to the color buffer.
+ * @param buf_size Size of the buffer in pixels (not bytes).
+ */
+static void lv_color_byte_swap(lv_color_t *buf, uint32_t buf_size) {
+    for (uint32_t i = 0; i < buf_size; i++) {
+        buf[i].full = (buf[i].full << 8) | (buf[i].full >> 8);
+    }
+}
+#endif
+
 static bool example_notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_io_event_data_t *edata, void *user_ctx)
 {
     if (is_initialized_lvgl)
@@ -119,6 +134,10 @@ static void example_lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_
     int offsetx2 = area->x2;
     int offsety1 = area->y1;
     int offsety2 = area->y2;
+#ifdef USE_PSRAM_DISP_BUFFER
+    // Swap the bytes for PSRAM configuration if needed
+    lv_color_byte_swap(color_map, lv_area_get_size(area));
+#endif
     // copy a buffer's content to a specific area of the display
     esp_lcd_panel_draw_bitmap(panel_handle, offsetx1, offsety1, offsetx2 + 1, offsety2 + 1, color_map);
 }
@@ -176,7 +195,11 @@ static void lv_touchpad_read(lv_indev_drv_t *indev_driver, lv_indev_data_t *data
                     PIN_LCD_D7,
                 },
             .bus_width = 8,
-            .max_transfer_bytes = LVGL_LCD_BUF_SIZE * sizeof(uint16_t),
+            #ifdef USE_PSRAM_DISP_BUFFER
+                .max_transfer_bytes = 16 * 1024, // Set a smaller DMA transfer size for PSRAM stability
+            #else
+                .max_transfer_bytes = LVGL_LCD_BUF_SIZE * sizeof(uint16_t),
+        #endif    
         };
         esp_lcd_new_i80_bus(&bus_config, &i80_bus);
 
@@ -232,7 +255,11 @@ static void lv_touchpad_read(lv_indev_drv_t *indev_driver, lv_indev_data_t *data
         }
 
         lv_init();
+#ifdef USE_PSRAM_DISP_BUFFER
+        lv_disp_buf = (lv_color_t *)heap_caps_malloc(LVGL_LCD_BUF_SIZE * sizeof(lv_color_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
+#else
         lv_disp_buf = (lv_color_t *)heap_caps_malloc(LVGL_LCD_BUF_SIZE * sizeof(lv_color_t), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+#endif
 
         lv_disp_draw_buf_init(&disp_buf, lv_disp_buf, NULL, LVGL_LCD_BUF_SIZE);
         /*Initialize the display*/

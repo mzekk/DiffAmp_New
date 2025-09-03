@@ -15,6 +15,7 @@
 #include "esp_sleep.h"
 #include "SysOptions.h"
 #include "BatteryManager.h"
+#include "TuneManager.h"
 //#include <esp_sleep.h>
 //#include "esp_lcd_panel_io.h"
 //#include "esp_lcd_panel_ops.h"
@@ -48,6 +49,7 @@ extern lv_indev_t *encoder_indev;
 void encoder_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data);
 extern bool wait_and_show_standby_screen(uint32_t timeout, uint8_t mode);
 extern bool WriteOptionsToFile(const char *fileName, const sysOptions &options);
+extern void enableHV_Regs(float vset);
 extern PCA9554 ioExp;
 extern MCP4728 dac4ch;
 extern MCP4726 dac1ch;
@@ -136,13 +138,11 @@ void HwInit(void){
     setupADC(adc);
     adc.start();
 
+
     ledcSetup(BL_PWM, 2000, 8);
     ledcAttachPin(PIN_LCD_BL, 0);
     ledcWrite(BL_PWM, DEFAULT_BRIGHTNESS);
-    
-    ledcSetup(BUZZER_PWM, 2500, 8);
-    ledcAttachPin(BUZZ_FAULT, 1);
-    ledcWrite(BUZZER_PWM, 127);
+
 }
 
 void keepPowerOn(void){
@@ -258,6 +258,8 @@ void tickHandler() {
   ++ctr;
   ++t500ms;
 
+  tune_manager_tick(); // Service the tune player state machine
+
   bool sw = digitalRead(SWPB);  // safe to call here
 
   if (sw) {
@@ -289,13 +291,17 @@ void timings(sysOptions* sysOpt){
   checkBacklightDimTimeout(sysOpt, currentTime);
   checkTurnOffRequest(sysOpt, currentTime);
   hwSysCheck(currentTime);
-
   if (pBatteryManager) {
-    pBatteryManager->update();
+    pBatteryManager->update(currentTime);
     if (pBatteryManager->getState() == BatteryManager::State::BATTERY_TOO_LOW) {
-      serialPrintDebug("Battery too low, forcing shutdown.\n");
-      digitalWrite(KEEP_ON, LOW); // Power off
-    }
+      if (wait_and_show_standby_screen(FIVE_SECONDS, LOWBATT_MSG_ID)) {
+          serialPrintDebug("Battery too low, forcing shutdown.\n");
+          digitalWrite(KEEP_ON, LOW); // Power off
+          while(1);       
+      }
+      pBatteryManager->setState(BatteryManager::State::ACTIVE);
+      waitKeyRelease();
+    }    
   }
 
   if(switchIsPressed == true)
@@ -319,8 +325,8 @@ void checkSleepModeTimeout(sysOptions* sysOptLoc, uint32_t currentTime){
       lastStandbyTime = millis();
       lv_scr_load(prev_screen);  // Restore previous screen
       lv_timer_handler();  // LVGL refresh
-      digitalWrite(EN_LPWR, HIGH);
-      digitalWrite(EN_HPWR, hvRegulatorState);
+      //digitalWrite(EN_LPWR, HIGH);
+      //digitalWrite(EN_HPWR, hvRegulatorState);
       delay(100);
       setupADC(adc);
       adc.start();
@@ -352,9 +358,9 @@ void checkBacklightDimTimeout(sysOptions* sysOpt, uint32_t currentTime){
 void checkTurnOffRequest(sysOptions* sysOpt, uint32_t currentTime){
   static uint32_t lastOffRequestTime = currentTime;
 
-  if(digitalRead(SWPB))
-    ++lastOffRequestTime;
-  else 
+  if(!digitalRead(SWPB))
+  //  ++lastOffRequestTime;
+  //else 
     lastOffRequestTime = currentTime;
 
   if(currentTime - lastOffRequestTime > sysOpt->SwitchTurnOffTime){
@@ -389,7 +395,6 @@ bool enterSleepMode(sysOptions* sysOpt){
 
   WriteOptionsToFile(optionsPath, *sysOpt);
 
-  digitalWrite(EN_HPWR, LOW);
   serialPrintDebug("Preparing to enter light sleep...\n");
   esp_lcd_panel_io_tx_param(io_handle, 0x10, NULL, 0);  // SLPIN (0x10)
 
@@ -406,11 +411,14 @@ bool enterSleepMode(sysOptions* sysOpt){
   //turn_off_display backlight;
   ledcWrite(BL_PWM, 0);
   digitalWrite(PIN_POWER_ON, LOW);
+
   // esp_sleep_enable_timer_wakeup(sysOpt->SleepTimeCycleMs * 1000ULL);
   //serialPrintDebug("Entering RTC light sleep now. RTC wakeup time: %d ms, no of cycles: %d\n", sysOpt->SleepTimeCycleMs, sysOpt->SleepNumCyclesToMeas);
   
-  if (pBatteryManager) pBatteryManager->enterSleepState(false);
+  if (pBatteryManager) pBatteryManager->enterSleepState(true);
   Wire.end();
+  digitalWrite(EN_LPWR, LOW);     // Turn off Low Voltage Circuits  
+  digitalWrite(EN_HPWR, LOW);     // Turn off High Voltage Circuits
 
   serialPrintDebug("Actual CPU Frequency: %dMHz\n", getCpuFrequencyMhz());
   setCpuFrequencyMhz(10);
@@ -419,7 +427,6 @@ bool enterSleepMode(sysOptions* sysOpt){
   while(true){
     // Stop I2C
 
-    digitalWrite(EN_LPWR, LOW);    
     //esp_light_sleep_start();  // Sleep... 
     delay(sysOpt->SleepTimeCycleMs); // Single sleep cycle (simulated in this case)
 
@@ -427,7 +434,7 @@ bool enterSleepMode(sysOptions* sysOpt){
     delay(10);
     
     if (pBatteryManager) {
-        pBatteryManager->update();
+        pBatteryManager->update(millis());
         BatteryManager::State currentState = pBatteryManager->getState();
         if (currentState == BatteryManager::State::SLEEP_TIME_EXPIRED || currentState == BatteryManager::State::BATTERY_TOO_LOW) {
             digitalWrite(KEEP_ON, LOW); // Power off
@@ -464,6 +471,8 @@ bool confirm_valid_wakeup(uint32_t debounce_time_ms) {
 
 void resumeSleepmode(int8_t backlight) {
   //timerAlarmEnable(My_timer); //Just Enable
+  digitalWrite(EN_LPWR, HIGH);     // Turn on Low Voltage Circuits  
+  //enableHV_Regs(VAMP_MIN);
   delay(100);
   //Serial.end();    // Optional
   //Serial.begin(115200);
@@ -489,7 +498,7 @@ void resumeSleepmode(int8_t backlight) {
   //serialPrintDebug("Setting Backlight:%d\n", backlight);
   initWiFi_AP();
   connected = false;
-  pBatteryManager->enterActiveState(false);
+  pBatteryManager->enterActiveState(true);
   //WiFi.mode(WIFI_STA);
   //esp_wifi_start();
   //WiFi.begin(ssid.c_str(), pass.c_str());  // You must manage these
@@ -579,10 +588,13 @@ float updateVdiff(float raw_ADC_data, uint16_t sampleAverages){
 }
   
 float vdiffInCalc(int32_t raw_ADC_data, float vinDiv){
-    float voffset = 0.00; 
+    float voffset = -0.0075; 
+    float fcorr = 1.035 * -3.1426;
+    float volt_per_bit = 244.14e-9;
+
     // float diffInV = ((float)raw_ADC_data) * 244.14e-9;
     // diffInV = diffInV + R31 * (diffInV * R36 - R35 * (ADS122C04_VREF - diffInV)) / (R35 * R36);
-    float diffInV = ((float)raw_ADC_data) * -3.1426 * 244.14e-9 - voffset;
+    float diffInV = ((float)raw_ADC_data) * fcorr * volt_per_bit - voffset;
     return diffInV * vinDiv;
 }
 
@@ -603,8 +615,17 @@ void setRelayDivider(bool state){
 
 void enableHV_Regs(float vset){
   digitalWrite(EN_HPWR, HIGH);
-  delay(1000);
+  delay(40);
   vampSet = VAMP_MIN;
+  vcalc = dac4ch.vampp2vdac(vampSet);
+  dacVals[2] = dac4ch.float2dac(vcalc);
+  vcalc = dac4ch.vampn2vdac(-vampSet);
+  dacVals[3] = dac4ch.float2dac(vcalc);
+  dac4ch.writeAllDACsFast(dacVals);
+  dac4ch.updateDACs();
+  
+  delay(500);
+
   while (vampSet <= vset) {
     delay(30);
     vcalc = dac4ch.vampp2vdac(vampSet);

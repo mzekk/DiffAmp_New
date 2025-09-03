@@ -47,6 +47,7 @@
 #define SLEEP_CYCLES_TO_MEASURE  20                // Number of sleep cycles to measure the battery voltage and charge status (tsample = SLEEP_INTERVAL_MILLISEC * MAX_SLEEP_CYCLES)
 #define SLEEP_MSG_ID      0
 #define OFF_MSG_ID        1
+#define LOWBATT_MSG_ID    2
 
 
 #define R31                10000.0  // Rtop ADC input #0
